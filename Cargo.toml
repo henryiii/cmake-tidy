@@ -3,6 +3,7 @@ members = [
     "crates/cmake-tidy",
     "crates/cmake-tidy-check",
     "crates/cmake-tidy-config",
+    "crates/cmake-tidy-format",
     "crates/cmake-tidy-ast",
     "crates/cmake-tidy-lexer",
     "crates/cmake-tidy-parser",

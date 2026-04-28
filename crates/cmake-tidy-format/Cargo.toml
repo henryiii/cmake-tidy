@@ -1,0 +1,14 @@
+[package]
+name = "cmake-tidy-format"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+cmake-tidy-ast = { path = "../cmake-tidy-ast" }
+cmake-tidy-lexer = { path = "../cmake-tidy-lexer" }
+
+[lints]
+workspace = true
+

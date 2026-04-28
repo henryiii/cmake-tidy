@@ -1,9 +1,12 @@
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
+
+static NEXT_TEMP_DIR: AtomicU64 = AtomicU64::new(0);
 
 #[test]
 fn check_reports_diagnostics_for_invalid_root_file() -> Result<()> {
@@ -128,8 +131,9 @@ fn unique_temp_dir() -> Result<PathBuf> {
         .duration_since(UNIX_EPOCH)
         .context("system clock is before UNIX_EPOCH")?
         .as_nanos();
+    let sequence = NEXT_TEMP_DIR.fetch_add(1, Ordering::Relaxed);
     Ok(std::env::temp_dir().join(format!(
-        "cmake-tidy-check-{}-{timestamp}",
-        std::process::id()
+        "cmake-tidy-check-{}-{timestamp}-{sequence}",
+        std::process::id(),
     )))
 }

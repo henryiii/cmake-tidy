@@ -1,4 +1,5 @@
 mod check;
+mod format;
 
 use std::fs;
 use std::path::PathBuf;
@@ -25,6 +26,9 @@ enum Command {
         ignore: Vec<RuleSelector>,
         paths: Vec<PathBuf>,
     },
+    Format {
+        paths: Vec<PathBuf>,
+    },
     Debug {
         #[command(subcommand)]
         command: DebugSubcommand,
@@ -46,6 +50,7 @@ fn main() -> ExitCode {
             paths,
         } => check::run(paths, build_lint_configuration(select, ignore))
             .map(ExitStatus::from_has_diagnostics),
+        Command::Format { paths } => format::run(paths).map(|_| ExitStatus::Success),
         Command::Debug { command } => match command {
             DebugSubcommand::Ast { filename } => debug_ast(filename),
         },

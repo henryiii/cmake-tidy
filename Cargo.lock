@@ -107,6 +107,7 @@ dependencies = [
  "cmake-tidy-ast",
  "cmake-tidy-check",
  "cmake-tidy-config",
+ "cmake-tidy-format",
  "cmake-tidy-parser",
 ]
 
@@ -131,6 +132,14 @@ dependencies = [
  "serde",
  "thiserror",
  "toml",
+]
+
+[[package]]
+name = "cmake-tidy-format"
+version = "0.1.0"
+dependencies = [
+ "cmake-tidy-ast",
+ "cmake-tidy-lexer",
 ]
 
 [[package]]
