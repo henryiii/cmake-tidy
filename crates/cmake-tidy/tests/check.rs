@@ -94,6 +94,24 @@ fn check_ignore_filters_diagnostics() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn check_respects_file_level_noqa() -> Result<()> {
+    let temp_dir = create_root_file("# noqa\nproject()\nproject(example)\n")?;
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cmake-tidy"))
+        .arg("check")
+        .arg(&temp_dir)
+        .output()
+        .context("failed to run cmake-tidy")?;
+
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stdout.is_empty());
+
+    fs::remove_dir_all(&temp_dir)
+        .with_context(|| format!("failed to remove {}", temp_dir.display()))?;
+    Ok(())
+}
+
 fn create_root_file(contents: &str) -> Result<PathBuf> {
     let temp_dir = unique_temp_dir()?;
     fs::create_dir_all(&temp_dir)

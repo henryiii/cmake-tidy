@@ -1,6 +1,9 @@
 use std::fmt;
+use std::str::FromStr;
 
 use cmake_tidy_ast::{CommandInvocation, File, Statement, TextRange};
+use cmake_tidy_config::RuleSelector;
+use cmake_tidy_lexer::{Token, TokenKind};
 use cmake_tidy_parser::{ParseError, parse_file};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -63,6 +66,8 @@ pub fn check_source(source: &str, options: &CheckOptions) -> CheckResult {
 
     diagnostics.extend(parsed.errors.iter().map(parse_error_diagnostic));
     diagnostics.extend(check_file(&parsed.syntax, options));
+    let noqa = NoqaDirectives::from_tokens(source, &parsed.tokens);
+    diagnostics.retain(|diagnostic| !noqa.suppresses(diagnostic));
     diagnostics.sort_by_key(|diagnostic| (diagnostic.range.start, diagnostic.range.end, diagnostic.code));
 
     CheckResult { diagnostics }
@@ -152,6 +157,131 @@ fn find_commands<'a>(commands: &[&'a CommandInvocation], name: &str) -> Vec<&'a 
         .collect()
 }
 
+#[derive(Debug)]
+struct NoqaDirectives {
+    file: Option<Directive>,
+    line_index: LineIndex,
+    line_directives: Vec<(usize, Directive)>,
+}
+
+impl NoqaDirectives {
+    fn from_tokens(source: &str, tokens: &[Token]) -> Self {
+        let line_index = LineIndex::new(source);
+        let mut directives = Self {
+            file: leading_file_directive(tokens),
+            line_index,
+            line_directives: Vec::new(),
+        };
+
+        for token in tokens {
+            let TokenKind::Comment(comment) = &token.kind else {
+                continue;
+            };
+
+            if let Some(directive) = parse_line_directive(comment) {
+                directives
+                    .line_directives
+                    .push((directives.line_index.line_number(token.range.start), directive));
+            }
+        }
+
+        directives
+    }
+
+    fn suppresses(&self, diagnostic: &Diagnostic) -> bool {
+        let code = diagnostic.code.to_string();
+
+        if self.file.as_ref().is_some_and(|directive| directive.matches(&code)) {
+            return true;
+        }
+
+        let line = self.line_index.line_number(diagnostic.range.start);
+        self.line_directives.iter().any(|(directive_line, directive)| {
+            *directive_line == line && directive.matches(&code)
+        })
+    }
+}
+
+#[derive(Debug)]
+struct Directive {
+    selectors: Vec<RuleSelector>,
+}
+
+impl Directive {
+    fn matches(&self, code: &str) -> bool {
+        self.selectors
+            .iter()
+            .any(|selector| selector.matches(code))
+    }
+}
+
+fn leading_file_directive(tokens: &[Token]) -> Option<Directive> {
+    for token in tokens {
+        match &token.kind {
+            TokenKind::Comment(comment) => {
+                if let Some(directive) = parse_file_directive(comment) {
+                    return Some(directive);
+                }
+            }
+            TokenKind::Whitespace(_) | TokenKind::Newline => {}
+            _ => break,
+        }
+    }
+
+    None
+}
+
+fn parse_file_directive(comment: &str) -> Option<Directive> {
+    let body = comment.strip_prefix('#')?.trim();
+    parse_noqa_directive(body)
+}
+
+fn parse_line_directive(comment: &str) -> Option<Directive> {
+    let body = comment.strip_prefix('#')?.trim();
+    parse_noqa_directive(body)
+}
+
+fn parse_noqa_directive(value: &str) -> Option<Directive> {
+    let directive = value.strip_prefix("noqa")?.trim();
+    if directive.is_empty() {
+        return Some(Directive {
+            selectors: vec![RuleSelector::All],
+        });
+    }
+
+    let selectors = directive.strip_prefix(':')?.split(',').map(str::trim).map(RuleSelector::from_str).collect::<Result<Vec<_>, _>>().ok()?;
+    if selectors.is_empty() {
+        return None;
+    }
+
+    Some(Directive { selectors })
+}
+
+#[derive(Debug)]
+struct LineIndex {
+    line_starts: Vec<usize>,
+}
+
+impl LineIndex {
+    fn new(source: &str) -> Self {
+        let mut line_starts = vec![0];
+        for (index, character) in source.char_indices() {
+            if character == '\n' {
+                line_starts.push(index + 1);
+            }
+        }
+
+        Self { line_starts }
+    }
+
+    fn line_number(&self, offset: usize) -> usize {
+        match self.line_starts.binary_search(&offset) {
+            Ok(index) => index + 1,
+            Err(index) => index,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{CheckOptions, RuleCode, check_source};
@@ -200,5 +330,34 @@ mod tests {
     fn skips_root_only_rules_for_non_root_files() {
         let codes = diagnostic_codes("add_subdirectory(src)\n", CheckOptions { project_root: false });
         assert!(codes.is_empty());
+    }
+
+    #[test]
+    fn line_noqa_suppresses_matching_rule() {
+        let codes = diagnostic_codes(
+            "project() # noqa: W203\nproject(example)\n",
+            CheckOptions { project_root: true },
+        );
+        assert!(!codes.contains(&RuleCode::W203));
+        assert!(codes.contains(&RuleCode::W202));
+        assert!(codes.contains(&RuleCode::W301));
+    }
+
+    #[test]
+    fn file_noqa_suppresses_all_rules() {
+        let codes = diagnostic_codes(
+            "# noqa\nproject()\nproject(example)\n",
+            CheckOptions { project_root: true },
+        );
+        assert!(codes.is_empty());
+    }
+
+    #[test]
+    fn file_noqa_can_target_specific_rules() {
+        let codes = diagnostic_codes(
+            "# noqa: W301,W202\nproject()\nproject(example)\n",
+            CheckOptions { project_root: true },
+        );
+        assert_eq!(codes, vec![RuleCode::W203]);
     }
 }

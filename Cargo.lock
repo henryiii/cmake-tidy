@@ -119,6 +119,8 @@ name = "cmake-tidy-check"
 version = "0.1.0"
 dependencies = [
  "cmake-tidy-ast",
+ "cmake-tidy-config",
+ "cmake-tidy-lexer",
  "cmake-tidy-parser",
 ]
 
