@@ -6,6 +6,7 @@ use std::process::ExitCode;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use cmake_tidy_config::{LintConfiguration, RuleSelector};
 use cmake_tidy_parser::parse_file;
 
 #[derive(Debug, Parser)]
@@ -18,6 +19,10 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum Command {
     Check {
+        #[arg(long, value_delimiter = ',', action = clap::ArgAction::Append)]
+        select: Vec<RuleSelector>,
+        #[arg(long, value_delimiter = ',', action = clap::ArgAction::Append)]
+        ignore: Vec<RuleSelector>,
         paths: Vec<PathBuf>,
     },
     Debug {
@@ -35,7 +40,12 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
 
     let result = match cli.command {
-        Command::Check { paths } => check::run(paths).map(ExitStatus::from_has_diagnostics),
+        Command::Check {
+            select,
+            ignore,
+            paths,
+        } => check::run(paths, build_lint_configuration(select, ignore))
+            .map(ExitStatus::from_has_diagnostics),
         Command::Debug { command } => match command {
             DebugSubcommand::Ast { filename } => debug_ast(filename),
         },
@@ -49,6 +59,20 @@ fn main() -> ExitCode {
             ExitCode::from(2)
         }
     }
+}
+
+fn build_lint_configuration(
+    select: Vec<RuleSelector>,
+    ignore: Vec<RuleSelector>,
+) -> LintConfiguration {
+    let mut lint = LintConfiguration::default();
+    if !select.is_empty() {
+        lint.select = select;
+    }
+    if !ignore.is_empty() {
+        lint.ignore = ignore;
+    }
+    lint
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

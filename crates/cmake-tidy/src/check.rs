@@ -3,8 +3,9 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use cmake_tidy_check::{CheckOptions, Diagnostic, check_source};
+use cmake_tidy_config::LintConfiguration;
 
-pub(crate) fn run(paths: Vec<PathBuf>) -> Result<bool> {
+pub(crate) fn run(paths: Vec<PathBuf>, lint: LintConfiguration) -> Result<bool> {
     let targets = discover_targets(&paths)?;
     if targets.is_empty() {
         bail!("no CMake files found");
@@ -22,12 +23,18 @@ pub(crate) fn run(paths: Vec<PathBuf>) -> Result<bool> {
             },
         );
 
-        if result.diagnostics.is_empty() {
+        let diagnostics = result
+            .diagnostics
+            .into_iter()
+            .filter(|diagnostic| lint.is_rule_enabled(&diagnostic.code.to_string()))
+            .collect::<Vec<_>>();
+
+        if diagnostics.is_empty() {
             continue;
         }
 
         let source_index = SourceIndex::new(&source);
-        for diagnostic in result.diagnostics {
+        for diagnostic in diagnostics {
             found_diagnostics = true;
             print_diagnostic(&target.path, &source_index, &diagnostic);
         }

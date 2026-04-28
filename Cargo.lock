@@ -106,6 +106,7 @@ dependencies = [
  "clap",
  "cmake-tidy-ast",
  "cmake-tidy-check",
+ "cmake-tidy-config",
  "cmake-tidy-parser",
 ]
 

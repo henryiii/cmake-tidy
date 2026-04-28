@@ -14,6 +14,7 @@ anyhow.workspace = true
 clap.workspace = true
 cmake-tidy-ast = { path = "../cmake-tidy-ast" }
 cmake-tidy-check = { path = "../cmake-tidy-check" }
+cmake-tidy-config = { path = "../cmake-tidy-config" }
 cmake-tidy-parser = { path = "../cmake-tidy-parser" }
 
 [lints]
