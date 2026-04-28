@@ -28,7 +28,25 @@ impl Default for Configuration {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct MainConfiguration {}
+pub struct MainConfiguration {
+    pub exclude: Vec<PathBuf>,
+}
+
+impl MainConfiguration {
+    #[must_use]
+    pub fn is_path_excluded(&self, path: &Path) -> bool {
+        self.exclude.iter().any(|excluded| {
+            if excluded.is_absolute() {
+                path.starts_with(excluded)
+            } else {
+                path.starts_with(excluded)
+                    || path
+                        .strip_prefix(Path::new("."))
+                        .is_ok_and(|relative_path| relative_path.starts_with(excluded))
+            }
+        })
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LintConfiguration {
@@ -228,7 +246,9 @@ fn pyproject_has_section(path: &Path) -> Result<Option<RawConfiguration>, Config
 fn normalize_configuration(raw: RawConfiguration, source: Option<PathBuf>) -> Configuration {
     Configuration {
         source,
-        main: MainConfiguration::default(),
+        main: MainConfiguration {
+            exclude: raw.exclude.unwrap_or_default(),
+        },
         lint: LintConfiguration {
             select: raw
                 .lint
@@ -242,6 +262,7 @@ fn normalize_configuration(raw: RawConfiguration, source: Option<PathBuf>) -> Co
 
 #[derive(Debug, Deserialize, Default)]
 struct RawConfiguration {
+    exclude: Option<Vec<PathBuf>>,
     #[serde(default)]
     lint: RawLintConfiguration,
     #[serde(default)]
@@ -301,11 +322,15 @@ mod tests {
         let directory = create_temp_dir();
         write_file(
             &directory.join("cmake-tidy.toml"),
-            "[lint]\nselect = [\"ALL\"]\nignore = [\"W2\"]\n",
+            "exclude = [\"build\", \"generated/output.cmake\"]\n[lint]\nselect = [\"ALL\"]\nignore = [\"W2\"]\n",
         );
 
         let config = load_configuration(&directory).expect("config should parse");
         assert_eq!(config.source, Some(directory.join("cmake-tidy.toml")));
+        assert_eq!(
+            config.main.exclude,
+            vec![PathBuf::from("build"), PathBuf::from("generated/output.cmake")]
+        );
         assert!(config.lint.is_rule_enabled("E001"));
         assert!(!config.lint.is_rule_enabled("W201"));
         assert!(config.lint.is_rule_enabled("W301"));
@@ -330,11 +355,12 @@ mod tests {
         let directory = create_temp_dir();
         write_file(
             &directory.join("pyproject.toml"),
-            "[tool.cmake-tidy.lint]\nselect = [\"W3\"]\nignore = [\"W302\"]\n",
+            "[tool.cmake-tidy]\nexclude = [\"third_party\"]\n\n[tool.cmake-tidy.lint]\nselect = [\"W3\"]\nignore = [\"W302\"]\n",
         );
 
         let config = load_configuration(&directory).expect("pyproject config should parse");
         assert_eq!(config.source, Some(directory.join("pyproject.toml")));
+        assert_eq!(config.main.exclude, vec![PathBuf::from("third_party")]);
         assert!(config.lint.is_rule_enabled("W301"));
         assert!(!config.lint.is_rule_enabled("W302"));
         assert!(!config.lint.is_rule_enabled("E001"));
@@ -395,6 +421,21 @@ mod tests {
 
         assert!(lint.is_rule_enabled("E001"));
         assert!(!lint.is_rule_enabled("W201"));
+    }
+
+    #[test]
+    fn excludes_match_relative_prefixes() {
+        let directory = create_temp_dir();
+        write_file(
+            &directory.join("cmake-tidy.toml"),
+            "exclude = [\"build\", \"vendor/generated.cmake\"]\n",
+        );
+
+        let config = load_configuration(&directory).expect("exclude config should parse");
+        assert!(config.main.is_path_excluded(Path::new("build/CMakeLists.txt")));
+        assert!(config.main.is_path_excluded(Path::new("./build/output/config.cmake")));
+        assert!(config.main.is_path_excluded(Path::new("vendor/generated.cmake")));
+        assert!(!config.main.is_path_excluded(Path::new("src/CMakeLists.txt")));
     }
 
     fn create_temp_dir() -> PathBuf {
