@@ -1,7 +1,10 @@
+mod check;
+
 use std::fs;
 use std::path::PathBuf;
+use std::process::ExitCode;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use cmake_tidy_parser::parse_file;
 
@@ -14,6 +17,9 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    Check {
+        paths: Vec<PathBuf>,
+    },
     Debug {
         #[command(subcommand)]
         command: DebugSubcommand,
@@ -25,17 +31,43 @@ enum DebugSubcommand {
     Ast { filename: PathBuf },
 }
 
-fn main() -> Result<()> {
+fn main() -> ExitCode {
     let cli = Cli::parse();
 
-    match cli.command {
+    let result = match cli.command {
+        Command::Check { paths } => check::run(paths).map(ExitStatus::from_has_diagnostics),
         Command::Debug { command } => match command {
             DebugSubcommand::Ast { filename } => debug_ast(filename),
         },
+    };
+
+    match result {
+        Ok(ExitStatus::Success) => ExitCode::SUCCESS,
+        Ok(ExitStatus::Diagnostics) => ExitCode::from(1),
+        Err(error) => {
+            eprintln!("error: {error:#}");
+            ExitCode::from(2)
+        }
     }
 }
 
-fn debug_ast(filename: PathBuf) -> Result<()> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExitStatus {
+    Success,
+    Diagnostics,
+}
+
+impl ExitStatus {
+    const fn from_has_diagnostics(has_diagnostics: bool) -> Self {
+        if has_diagnostics {
+            Self::Diagnostics
+        } else {
+            Self::Success
+        }
+    }
+}
+
+fn debug_ast(filename: PathBuf) -> Result<ExitStatus> {
     let source = fs::read_to_string(&filename)
         .with_context(|| format!("failed to read CMake file: {}", filename.display()))?;
 
@@ -43,7 +75,7 @@ fn debug_ast(filename: PathBuf) -> Result<()> {
     println!("{:#?}", parsed.syntax);
 
     if parsed.errors.is_empty() {
-        return Ok(());
+        return Ok(ExitStatus::Success);
     }
 
     eprintln!("parse errors:");
@@ -54,5 +86,5 @@ fn debug_ast(filename: PathBuf) -> Result<()> {
         );
     }
 
-    bail!("encountered {} parse error(s)", parsed.errors.len());
+    Ok(ExitStatus::Diagnostics)
 }

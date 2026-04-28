@@ -104,12 +104,22 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "cmake-tidy-ast",
+ "cmake-tidy-check",
  "cmake-tidy-parser",
 ]
 
 [[package]]
 name = "cmake-tidy-ast"
 version = "0.1.0"
+
+[[package]]
+name = "cmake-tidy-check"
+version = "0.1.0"
+dependencies = [
+ "cmake-tidy-ast",
+ "cmake-tidy-parser",
+]
 
 [[package]]
 name = "cmake-tidy-lexer"

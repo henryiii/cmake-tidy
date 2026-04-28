@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "crates/cmake-tidy",
+    "crates/cmake-tidy-check",
     "crates/cmake-tidy-ast",
     "crates/cmake-tidy-lexer",
     "crates/cmake-tidy-parser",
@@ -25,4 +26,3 @@ unsafe_code = "forbid"
 all = "warn"
 pedantic = "warn"
 nursery = "warn"
-
