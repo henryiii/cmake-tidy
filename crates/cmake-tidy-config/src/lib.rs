@@ -78,8 +78,22 @@ impl LintConfiguration {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct FormatConfiguration {}
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FormatConfiguration {
+    pub final_newline: bool,
+    pub max_blank_lines: usize,
+    pub space_before_paren: bool,
+}
+
+impl Default for FormatConfiguration {
+    fn default() -> Self {
+        Self {
+            final_newline: true,
+            max_blank_lines: 1,
+            space_before_paren: false,
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RuleSelector {
@@ -276,11 +290,23 @@ struct RawLintConfiguration {
 }
 
 #[derive(Debug, Deserialize, Default)]
-struct RawFormatConfiguration {}
+#[serde(rename_all = "kebab-case")]
+struct RawFormatConfiguration {
+    final_newline: Option<bool>,
+    max_blank_lines: Option<usize>,
+    space_before_paren: Option<bool>,
+}
 
 impl From<RawFormatConfiguration> for FormatConfiguration {
-    fn from(_value: RawFormatConfiguration) -> Self {
-        Self::default()
+    fn from(value: RawFormatConfiguration) -> Self {
+        let defaults = Self::default();
+        Self {
+            final_newline: value.final_newline.unwrap_or(defaults.final_newline),
+            max_blank_lines: value.max_blank_lines.unwrap_or(defaults.max_blank_lines),
+            space_before_paren: value
+                .space_before_paren
+                .unwrap_or(defaults.space_before_paren),
+        }
     }
 }
 
@@ -341,13 +367,15 @@ mod tests {
         let directory = create_temp_dir();
         write_file(
             &directory.join(".cmake-tidy.toml"),
-            "[lint]\nselect = [\"W301\"]\n",
+            "[lint]\nselect = [\"W301\"]\n[format]\nmax-blank-lines = 2\n",
         );
 
         let config = load_configuration(&directory).expect("hidden config should parse");
         assert_eq!(config.source, Some(directory.join(".cmake-tidy.toml")));
         assert!(config.lint.is_rule_enabled("W301"));
         assert!(!config.lint.is_rule_enabled("W302"));
+        assert_eq!(config.format.max_blank_lines, 2);
+        assert!(!config.format.space_before_paren);
     }
 
     #[test]
@@ -355,7 +383,7 @@ mod tests {
         let directory = create_temp_dir();
         write_file(
             &directory.join("pyproject.toml"),
-            "[tool.cmake-tidy]\nexclude = [\"third_party\"]\n\n[tool.cmake-tidy.lint]\nselect = [\"W3\"]\nignore = [\"W302\"]\n",
+            "[tool.cmake-tidy]\nexclude = [\"third_party\"]\n\n[tool.cmake-tidy.lint]\nselect = [\"W3\"]\nignore = [\"W302\"]\n\n[tool.cmake-tidy.format]\nfinal-newline = false\nspace-before-paren = true\n",
         );
 
         let config = load_configuration(&directory).expect("pyproject config should parse");
@@ -364,6 +392,8 @@ mod tests {
         assert!(config.lint.is_rule_enabled("W301"));
         assert!(!config.lint.is_rule_enabled("W302"));
         assert!(!config.lint.is_rule_enabled("E001"));
+        assert!(!config.format.final_newline);
+        assert!(config.format.space_before_paren);
     }
 
     #[test]

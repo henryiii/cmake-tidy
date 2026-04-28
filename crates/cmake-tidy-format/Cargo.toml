@@ -7,8 +7,8 @@ license.workspace = true
 
 [dependencies]
 cmake-tidy-ast = { path = "../cmake-tidy-ast" }
+cmake-tidy-config = { path = "../cmake-tidy-config" }
 cmake-tidy-lexer = { path = "../cmake-tidy-lexer" }
 
 [lints]
 workspace = true
-

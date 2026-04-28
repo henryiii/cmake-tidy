@@ -139,6 +139,7 @@ name = "cmake-tidy-format"
 version = "0.1.0"
 dependencies = [
  "cmake-tidy-ast",
+ "cmake-tidy-config",
  "cmake-tidy-lexer",
 ]
 
