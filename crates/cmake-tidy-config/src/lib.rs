@@ -1,5 +1,6 @@
+mod coverage_excluded;
+
 use std::fmt;
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
@@ -267,10 +268,7 @@ pub fn load_configuration_from_file(path: &Path) -> Result<Configuration, Config
 }
 
 fn read_file(path: &Path) -> Result<String, ConfigError> {
-    fs::read_to_string(path).map_err(|source| ConfigError::ReadFile {
-        path: path.to_path_buf(),
-        source,
-    })
+    coverage_excluded::read_file(path)
 }
 
 fn parse_standard_file(content: &str, path: &Path) -> Result<RawConfiguration, ConfigError> {

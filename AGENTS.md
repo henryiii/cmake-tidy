@@ -31,6 +31,23 @@ cargo test -p cmake-tidy-parser --test fixtures
 cargo test -p cmake-tidy-check --test fixtures
 ```
 
+Coverage commands:
+
+```bash
+# Canonical workspace coverage summary
+cargo coverage
+
+# Generate an HTML coverage report
+cargo coverage-html
+
+# Raw coverage without repo-level exclusions
+cargo llvm-cov --workspace --all-features --summary-only
+```
+
+- `cargo coverage` and `cargo coverage-html` are defined in `.cargo/config.toml`.
+- Those aliases intentionally exclude `coverage_excluded.rs` helper files, which only wrap low-value filesystem and IO error handling.
+- Use the raw `cargo llvm-cov` command if you specifically want to include those helper files in the report.
+
 ## High-level architecture
 
 This repository is a Rust workspace with separate crates for each stage of the pipeline:

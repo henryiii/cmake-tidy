@@ -188,4 +188,6 @@ Code inside a disabled region is preserved verbatim. Formatting resumes after th
 - Bracket arguments are intentionally preserved verbatim during formatting for now.
 - The naming rule family is opt-in; it is not selected by default because default lint selection remains `["E", "W"]`.
 - `lint.per-file-ignores` uses Ruff-style pattern-to-selector mappings.
+- Use `cargo coverage` for the canonical workspace coverage summary and `cargo coverage-html` for an HTML report.
+- The coverage aliases intentionally exclude `coverage_excluded.rs` helper files that only wrap low-value filesystem/error handling paths.
 - The architecture notes for longer-term design live in [`ARCHETECTURE.md`](ARCHETECTURE.md).

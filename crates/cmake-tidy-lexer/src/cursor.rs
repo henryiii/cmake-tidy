@@ -42,3 +42,35 @@ impl<'a> Cursor<'a> {
         self.offset += byte_count;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Cursor;
+
+    #[test]
+    fn cursor_advances_through_unicode_and_reports_remaining_text() {
+        let mut cursor = Cursor::new("aé\n");
+
+        assert_eq!(cursor.peek_char(), Some('a'));
+        assert_eq!(cursor.bump_char(), Some('a'));
+        assert_eq!(cursor.offset(), 1);
+        assert_eq!(cursor.peek_char(), Some('é'));
+        assert_eq!(cursor.remaining(), "é\n");
+        assert_eq!(cursor.bump_char(), Some('é'));
+        assert_eq!(cursor.offset(), "aé".len());
+        assert_eq!(cursor.slice(0, cursor.offset()), "aé");
+    }
+
+    #[test]
+    fn cursor_supports_prefix_checks_and_byte_advances() {
+        let mut cursor = Cursor::new("\r\nrest");
+
+        assert!(cursor.starts_with("\r\n"));
+        cursor.advance_bytes(2);
+        assert_eq!(cursor.remaining(), "rest");
+        assert!(!cursor.is_eof());
+        cursor.advance_bytes(4);
+        assert!(cursor.is_eof());
+        assert_eq!(cursor.peek_char(), None);
+    }
+}

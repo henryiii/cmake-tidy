@@ -1,9 +1,10 @@
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use cmake_tidy_config::load_configuration;
 use cmake_tidy_format::format_source_with_options;
+
+use crate::coverage_excluded;
 
 pub fn run(paths: &[PathBuf]) -> Result<bool> {
     let current_directory = std::env::current_dir().context("failed to read current directory")?;
@@ -21,15 +22,13 @@ pub fn run(paths: &[PathBuf]) -> Result<bool> {
     let mut changed_any = false;
 
     for path in targets {
-        let source = fs::read_to_string(&path)
-            .with_context(|| format!("failed to read CMake file: {}", path.display()))?;
+        let source = coverage_excluded::read_cmake_file(&path)?;
         let result = format_source_with_options(&source, &configuration.format);
         if !result.changed {
             continue;
         }
 
-        fs::write(&path, result.output)
-            .with_context(|| format!("failed to write formatted file: {}", path.display()))?;
+        coverage_excluded::write_formatted_file(&path, result.output)?;
         changed_any = true;
     }
 
@@ -57,8 +56,7 @@ fn collect_targets(
     main: &cmake_tidy_config::MainConfiguration,
     targets: &mut Vec<PathBuf>,
 ) -> Result<()> {
-    let metadata = fs::metadata(path)
-        .with_context(|| format!("failed to read file metadata: {}", path.display()))?;
+    let metadata = coverage_excluded::read_metadata(path)?;
 
     if metadata.is_file() {
         if is_cmake_file(path) && !is_excluded(path, current_directory, main) {
@@ -67,10 +65,8 @@ fn collect_targets(
         return Ok(());
     }
 
-    for entry in fs::read_dir(path)
-        .with_context(|| format!("failed to read directory: {}", path.display()))?
-    {
-        let entry = entry.with_context(|| format!("failed to read entry in {}", path.display()))?;
+    for entry in coverage_excluded::read_directory(path)? {
+        let entry = coverage_excluded::read_directory_entry(entry, path)?;
         let entry_path = entry.path();
 
         if entry.file_type().is_ok_and(|file_type| file_type.is_dir()) {
@@ -100,4 +96,141 @@ fn is_excluded(
         |_| main.is_path_excluded(path),
         |relative| main.is_path_excluded(relative),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use anyhow::{Context, Result};
+    use cmake_tidy_config::MainConfiguration;
+
+    use super::{discover_targets, is_cmake_file, is_excluded};
+
+    static NEXT_TEMP_DIR: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn discovers_direct_cmake_file_inputs() -> Result<()> {
+        let temp_dir = unique_temp_dir()?;
+        fs::create_dir_all(&temp_dir)
+            .with_context(|| format!("failed to create {}", temp_dir.display()))?;
+        let cmake_file = temp_dir.join("tooling.cmake");
+        fs::write(&cmake_file, "message(STATUS hi)\n")
+            .with_context(|| format!("failed to write {}", cmake_file.display()))?;
+
+        let targets = discover_targets(
+            std::slice::from_ref(&cmake_file),
+            &temp_dir,
+            &MainConfiguration::default(),
+        )?;
+
+        assert_eq!(targets, vec![cmake_file]);
+
+        fs::remove_dir_all(&temp_dir)
+            .with_context(|| format!("failed to remove {}", temp_dir.display()))?;
+        Ok(())
+    }
+
+    #[test]
+    fn deduplicates_targets_when_directory_and_file_overlap() -> Result<()> {
+        let temp_dir = unique_temp_dir()?;
+        fs::create_dir_all(&temp_dir)
+            .with_context(|| format!("failed to create {}", temp_dir.display()))?;
+        let cmakelists = temp_dir.join("CMakeLists.txt");
+        fs::write(&cmakelists, "project(example)\n")
+            .with_context(|| format!("failed to write {}", cmakelists.display()))?;
+
+        let targets = discover_targets(
+            &[temp_dir.clone(), cmakelists.clone()],
+            &temp_dir,
+            &MainConfiguration::default(),
+        )?;
+
+        assert_eq!(targets, vec![cmakelists]);
+
+        fs::remove_dir_all(&temp_dir)
+            .with_context(|| format!("failed to remove {}", temp_dir.display()))?;
+        Ok(())
+    }
+
+    #[test]
+    fn recognizes_cmake_file_names() {
+        assert!(is_cmake_file(std::path::Path::new("CMakeLists.txt")));
+        assert!(is_cmake_file(std::path::Path::new("tooling.cmake")));
+        assert!(!is_cmake_file(std::path::Path::new("notes.txt")));
+    }
+
+    #[test]
+    fn discovers_no_targets_for_excluded_file_input() -> Result<()> {
+        let temp_dir = unique_temp_dir()?;
+        fs::create_dir_all(&temp_dir)
+            .with_context(|| format!("failed to create {}", temp_dir.display()))?;
+        let excluded_dir = temp_dir.join("generated");
+        fs::create_dir_all(&excluded_dir)
+            .with_context(|| format!("failed to create {}", excluded_dir.display()))?;
+        let cmake_file = excluded_dir.join("tooling.cmake");
+        fs::write(&cmake_file, "message(STATUS hi)\n")
+            .with_context(|| format!("failed to write {}", cmake_file.display()))?;
+
+        let targets = discover_targets(
+            std::slice::from_ref(&cmake_file),
+            &temp_dir,
+            &MainConfiguration {
+                exclude: vec![PathBuf::from("generated")],
+                ..MainConfiguration::default()
+            },
+        )?;
+
+        assert!(targets.is_empty());
+
+        fs::remove_dir_all(&temp_dir)
+            .with_context(|| format!("failed to remove {}", temp_dir.display()))?;
+        Ok(())
+    }
+
+    #[test]
+    fn discover_targets_errors_for_missing_path() {
+        let temp_dir = std::env::temp_dir();
+        let missing = temp_dir.join("cmake-tidy-format-missing-input");
+        let error = discover_targets(
+            std::slice::from_ref(&missing),
+            &temp_dir,
+            &MainConfiguration::default(),
+        )
+        .expect_err("missing path should error");
+
+        assert!(error.to_string().contains("failed to read file metadata"));
+    }
+
+    #[test]
+    fn excludes_match_relative_paths() {
+        let current_directory = std::path::Path::new("/workspace");
+        let path = current_directory.join("generated").join("tooling.cmake");
+        let configuration = MainConfiguration {
+            exclude: vec![PathBuf::from("generated")],
+            ..MainConfiguration::default()
+        };
+
+        assert!(is_excluded(&path, current_directory, &configuration));
+        assert!(!is_excluded(
+            &current_directory.join("src").join("tooling.cmake"),
+            current_directory,
+            &configuration,
+        ));
+    }
+
+    fn unique_temp_dir() -> Result<PathBuf> {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .context("system clock is before UNIX_EPOCH")?
+            .as_nanos();
+        let sequence = NEXT_TEMP_DIR.fetch_add(1, Ordering::Relaxed);
+        Ok(std::env::temp_dir().join(format!(
+            "cmake-tidy-format-unit-{}-{timestamp}-{sequence}",
+            std::process::id(),
+        )))
+    }
 }

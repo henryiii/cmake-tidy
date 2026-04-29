@@ -1,11 +1,11 @@
 mod check;
+mod coverage_excluded;
 mod format;
 
-use std::fs;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::{Parser, Subcommand};
 use cmake_tidy_config::RuleSelector;
 use cmake_tidy_parser::parse_file;
@@ -85,8 +85,7 @@ impl ExitStatus {
 }
 
 fn debug_ast(filename: &std::path::Path) -> Result<ExitStatus> {
-    let source = fs::read_to_string(filename)
-        .with_context(|| format!("failed to read CMake file: {}", filename.display()))?;
+    let source = coverage_excluded::read_cmake_file(filename)?;
 
     let parsed = parse_file(&source);
     println!("{:#?}", parsed.syntax);

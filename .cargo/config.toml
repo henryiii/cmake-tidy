@@ -1,0 +1,17 @@
+[alias]
+coverage = [
+    "llvm-cov",
+    "--workspace",
+    "--all-features",
+    "--summary-only",
+    "--ignore-filename-regex",
+    "coverage_excluded\\.rs$",
+]
+coverage-html = [
+    "llvm-cov",
+    "--workspace",
+    "--all-features",
+    "--html",
+    "--ignore-filename-regex",
+    "coverage_excluded\\.rs$",
+]
