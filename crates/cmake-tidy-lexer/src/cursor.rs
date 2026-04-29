@@ -1,4 +1,4 @@
-pub(crate) struct Cursor<'a> {
+pub struct Cursor<'a> {
     source: &'a str,
     offset: usize,
 }
@@ -38,8 +38,7 @@ impl<'a> Cursor<'a> {
         Some(character)
     }
 
-    pub(crate) fn advance_bytes(&mut self, byte_count: usize) {
+    pub(crate) const fn advance_bytes(&mut self, byte_count: usize) {
         self.offset += byte_count;
     }
 }
-

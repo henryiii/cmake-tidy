@@ -28,4 +28,3 @@ mod tests {
         assert!(matches!(tokens[2].kind, TokenKind::BracketArgument(_)));
     }
 }
-

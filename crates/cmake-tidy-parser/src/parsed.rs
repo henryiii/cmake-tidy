@@ -15,4 +15,3 @@ pub struct ParseError {
     pub message: String,
     pub range: TextRange,
 }
-

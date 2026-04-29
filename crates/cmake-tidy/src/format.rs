@@ -5,11 +5,15 @@ use anyhow::{Context, Result, bail};
 use cmake_tidy_config::load_configuration;
 use cmake_tidy_format::format_source_with_options;
 
-pub(crate) fn run(paths: Vec<PathBuf>) -> Result<bool> {
+pub fn run(paths: &[PathBuf]) -> Result<bool> {
     let current_directory = std::env::current_dir().context("failed to read current directory")?;
-    let configuration = load_configuration(&current_directory)
-        .with_context(|| format!("failed to load configuration from {}", current_directory.display()))?;
-    let targets = discover_targets(&paths, &current_directory, &configuration.main)?;
+    let configuration = load_configuration(&current_directory).with_context(|| {
+        format!(
+            "failed to load configuration from {}",
+            current_directory.display()
+        )
+    })?;
+    let targets = discover_targets(paths, &current_directory, &configuration.main)?;
     if targets.is_empty() {
         bail!("no CMake files found");
     }
@@ -71,10 +75,8 @@ fn collect_targets(
 
         if entry.file_type().is_ok_and(|file_type| file_type.is_dir()) {
             collect_targets(&entry_path, current_directory, main, targets)?;
-        } else if is_cmake_file(&entry_path) {
-            if !is_excluded(&entry_path, current_directory, main) {
-                targets.push(entry_path);
-            }
+        } else if is_cmake_file(&entry_path) && !is_excluded(&entry_path, current_directory, main) {
+            targets.push(entry_path);
         }
     }
 
@@ -82,8 +84,11 @@ fn collect_targets(
 }
 
 fn is_cmake_file(path: &Path) -> bool {
-    path.file_name().is_some_and(|file_name| file_name == "CMakeLists.txt")
-        || path.extension().is_some_and(|extension| extension == "cmake")
+    path.file_name()
+        .is_some_and(|file_name| file_name == "CMakeLists.txt")
+        || path
+            .extension()
+            .is_some_and(|extension| extension == "cmake")
 }
 
 fn is_excluded(
@@ -91,7 +96,8 @@ fn is_excluded(
     current_directory: &Path,
     main: &cmake_tidy_config::MainConfiguration,
 ) -> bool {
-    path
-        .strip_prefix(current_directory)
-        .map_or_else(|_| main.is_path_excluded(path), |relative| main.is_path_excluded(relative))
+    path.strip_prefix(current_directory).map_or_else(
+        |_| main.is_path_excluded(path),
+        |relative| main.is_path_excluded(relative),
+    )
 }

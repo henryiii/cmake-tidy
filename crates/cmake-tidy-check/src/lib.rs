@@ -82,10 +82,16 @@ pub fn check_source(source: &str, options: &CheckOptions) -> CheckResult {
     let mut diagnostics = Vec::new();
 
     diagnostics.extend(parsed.errors.iter().map(parse_error_diagnostic));
-    diagnostics.extend(check_file(&parsed.syntax, options));
+    diagnostics.extend(check_file(&parsed.syntax, *options));
     let noqa = NoqaDirectives::from_tokens(source, &parsed.tokens);
     diagnostics.retain(|diagnostic| !noqa.suppresses(diagnostic));
-    diagnostics.sort_by_key(|diagnostic| (diagnostic.range.start, diagnostic.range.end, diagnostic.code));
+    diagnostics.sort_by_key(|diagnostic| {
+        (
+            diagnostic.range.start,
+            diagnostic.range.end,
+            diagnostic.code,
+        )
+    });
 
     CheckResult { diagnostics }
 }
@@ -94,7 +100,7 @@ fn parse_error_diagnostic(error: &ParseError) -> Diagnostic {
     Diagnostic::new(RuleCode::E001, error.message.clone(), error.range)
 }
 
-fn check_file(file: &File, options: &CheckOptions) -> Vec<Diagnostic> {
+fn check_file(file: &File, options: CheckOptions) -> Vec<Diagnostic> {
     let commands = file
         .items
         .iter()
@@ -258,9 +264,10 @@ impl NoqaDirectives {
             };
 
             if let Some(directive) = parse_line_directive(comment) {
-                directives
-                    .line_directives
-                    .push((directives.line_index.line_number(token.range.start), directive));
+                directives.line_directives.push((
+                    directives.line_index.line_number(token.range.start),
+                    directive,
+                ));
             }
         }
 
@@ -270,14 +277,18 @@ impl NoqaDirectives {
     fn suppresses(&self, diagnostic: &Diagnostic) -> bool {
         let code = diagnostic.code.to_string();
 
-        if self.file.as_ref().is_some_and(|directive| directive.matches(&code)) {
+        if self
+            .file
+            .as_ref()
+            .is_some_and(|directive| directive.matches(&code))
+        {
             return true;
         }
 
         let line = self.line_index.line_number(diagnostic.range.start);
-        self.line_directives.iter().any(|(directive_line, directive)| {
-            *directive_line == line && directive.matches(&code)
-        })
+        self.line_directives
+            .iter()
+            .any(|(directive_line, directive)| *directive_line == line && directive.matches(&code))
     }
 }
 
@@ -288,9 +299,7 @@ struct Directive {
 
 impl Directive {
     fn matches(&self, code: &str) -> bool {
-        self.selectors
-            .iter()
-            .any(|selector| selector.matches(code))
+        self.selectors.iter().any(|selector| selector.matches(code))
     }
 }
 
@@ -328,7 +337,13 @@ fn parse_noqa_directive(value: &str) -> Option<Directive> {
         });
     }
 
-    let selectors = directive.strip_prefix(':')?.split(',').map(str::trim).map(RuleSelector::from_str).collect::<Result<Vec<_>, _>>().ok()?;
+    let selectors = directive
+        .strip_prefix(':')?
+        .split(',')
+        .map(str::trim)
+        .map(RuleSelector::from_str)
+        .collect::<Result<Vec<_>, _>>()
+        .ok()?;
     if selectors.is_empty() {
         return None;
     }
@@ -508,8 +523,11 @@ mod tests {
                 function_name_case: NameCase::Lower,
             },
         );
-        let fixed = apply_fixes("ADD_LIBRARY(example STATIC main.cpp)\n", &result.diagnostics)
-            .expect("naming fix should produce an edit");
+        let fixed = apply_fixes(
+            "ADD_LIBRARY(example STATIC main.cpp)\n",
+            &result.diagnostics,
+        )
+        .expect("naming fix should produce an edit");
         assert_eq!(fixed, "add_library(example STATIC main.cpp)\n");
     }
 }

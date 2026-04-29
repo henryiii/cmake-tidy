@@ -1,6 +1,6 @@
 use cmake_tidy_ast::TextRange;
-use cmake_tidy_lexer::{TokenKind, tokenize};
 use cmake_tidy_config::FormatConfiguration;
+use cmake_tidy_lexer::{TokenKind, tokenize};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FormatResult {
@@ -154,12 +154,8 @@ fn normalize_lines(
         }
     }
 
-    if kept_lines.is_empty() && options.final_newline {
-        output.push_str(preferred_newline);
-    } else if !kept_lines.is_empty()
-        && options.final_newline
-        && !output.ends_with('\n')
-        && !output.ends_with("\r\n")
+    if options.final_newline
+        && (kept_lines.is_empty() || (!output.ends_with('\n') && !output.ends_with("\r\n")))
     {
         output.push_str(preferred_newline);
     }
@@ -176,9 +172,9 @@ fn trimmed_line_end(bytes: &[u8], line_start: usize, line_end: usize) -> usize {
 }
 
 fn overlaps_protected_range(range: TextRange, protected_ranges: &[TextRange]) -> bool {
-    protected_ranges.iter().any(|protected| {
-        range.start < protected.end && protected.start < range.end
-    })
+    protected_ranges
+        .iter()
+        .any(|protected| range.start < protected.end && protected.start < range.end)
 }
 
 fn preferred_newline(source: &str) -> &str {

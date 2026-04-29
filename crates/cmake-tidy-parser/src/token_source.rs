@@ -1,6 +1,6 @@
 use cmake_tidy_lexer::Token;
 
-pub(crate) struct TokenSource<'a> {
+pub struct TokenSource<'a> {
     tokens: &'a [Token],
     significant: Vec<usize>,
     position: usize,

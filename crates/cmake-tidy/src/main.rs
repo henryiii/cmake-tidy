@@ -51,11 +51,10 @@ fn main() -> ExitCode {
             ignore,
             fix,
             paths,
-        } => check::run(paths, select, ignore, fix)
-            .map(ExitStatus::from_has_diagnostics),
-        Command::Format { paths } => format::run(paths).map(|_| ExitStatus::Success),
+        } => check::run(&paths, select, ignore, fix).map(ExitStatus::from_has_diagnostics),
+        Command::Format { paths } => format::run(&paths).map(|_| ExitStatus::Success),
         Command::Debug { command } => match command {
-            DebugSubcommand::Ast { filename } => debug_ast(filename),
+            DebugSubcommand::Ast { filename } => debug_ast(&filename),
         },
     };
 
@@ -85,8 +84,8 @@ impl ExitStatus {
     }
 }
 
-fn debug_ast(filename: PathBuf) -> Result<ExitStatus> {
-    let source = fs::read_to_string(&filename)
+fn debug_ast(filename: &std::path::Path) -> Result<ExitStatus> {
+    let source = fs::read_to_string(filename)
         .with_context(|| format!("failed to read CMake file: {}", filename.display()))?;
 
     let parsed = parse_file(&source);

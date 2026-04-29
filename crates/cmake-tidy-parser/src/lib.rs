@@ -13,9 +13,8 @@ mod tests {
 
     #[test]
     fn parses_simple_command_invocations() {
-        let parsed = parse_file(
-            "cmake_minimum_required(VERSION 3.30)\nproject(example LANGUAGES C CXX)\n",
-        );
+        let parsed =
+            parse_file("cmake_minimum_required(VERSION 3.30)\nproject(example LANGUAGES C CXX)\n");
 
         assert!(parsed.errors.is_empty());
         assert_eq!(parsed.syntax.items.len(), 2);
@@ -39,4 +38,3 @@ mod tests {
         assert!(matches!(command.arguments[0], Argument::ParenGroup(_)));
     }
 }
-

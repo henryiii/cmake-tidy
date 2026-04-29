@@ -5,18 +5,22 @@ use anyhow::{Context, Result, bail};
 use cmake_tidy_check::{CheckOptions, Diagnostic, apply_fixes, check_source};
 use cmake_tidy_config::{LintConfiguration, MainConfiguration, RuleSelector, load_configuration};
 
-pub(crate) fn run(
-    paths: Vec<PathBuf>,
+pub fn run(
+    paths: &[PathBuf],
     select: Vec<RuleSelector>,
     ignore: Vec<RuleSelector>,
     fix: bool,
 ) -> Result<bool> {
     let current_directory = std::env::current_dir().context("failed to read current directory")?;
-    let configuration = load_configuration(&current_directory)
-        .with_context(|| format!("failed to load configuration from {}", current_directory.display()))?;
+    let configuration = load_configuration(&current_directory).with_context(|| {
+        format!(
+            "failed to load configuration from {}",
+            current_directory.display()
+        )
+    })?;
     let lint = build_lint_configuration(&configuration.lint, select, ignore);
     let fix_enabled = fix || configuration.main.fix;
-    let targets = discover_targets(&paths, &current_directory, &configuration.main)?;
+    let targets = discover_targets(paths, &current_directory, &configuration.main)?;
     if targets.is_empty() {
         bail!("no CMake files found");
     }
@@ -39,8 +43,9 @@ pub(crate) fn run(
 
         let current_source = if fix_enabled {
             if let Some(fixed) = apply_fixes(&source, &diagnostics) {
-                fs::write(&target.path, &fixed)
-                    .with_context(|| format!("failed to write fixed file: {}", target.path.display()))?;
+                fs::write(&target.path, &fixed).with_context(|| {
+                    format!("failed to write fixed file: {}", target.path.display())
+                })?;
                 fixed
             } else {
                 source
@@ -131,7 +136,9 @@ fn collect_targets(
         if !is_excluded(current_path, current_directory, main) {
             targets.push(FileTarget {
                 path: current_path.to_path_buf(),
-                project_root: current_path.file_name().is_some_and(|file_name| file_name == "CMakeLists.txt"),
+                project_root: current_path
+                    .file_name()
+                    .is_some_and(|file_name| file_name == "CMakeLists.txt"),
             });
         }
         return Ok(());
@@ -149,7 +156,8 @@ fn collect_targets(
         .with_context(|| format!("failed to read directory: {}", current_path.display()))?;
 
     for entry in entries {
-        let entry = entry.with_context(|| format!("failed to read entry in {}", current_path.display()))?;
+        let entry =
+            entry.with_context(|| format!("failed to read entry in {}", current_path.display()))?;
         let entry_path = entry.path();
 
         if entry.file_type().is_ok_and(|file_type| file_type.is_dir()) {
@@ -158,18 +166,18 @@ fn collect_targets(
         }
 
         let is_direct_root_file = current_path == input_path
-            && entry_path.file_name().is_some_and(|file_name| file_name == "CMakeLists.txt");
+            && entry_path
+                .file_name()
+                .is_some_and(|file_name| file_name == "CMakeLists.txt");
         if is_direct_root_file {
             continue;
         }
 
-        if is_cmake_file(&entry_path) {
-            if !is_excluded(&entry_path, current_directory, main) {
-                targets.push(FileTarget {
-                    path: entry_path,
-                    project_root: false,
-                });
-            }
+        if is_cmake_file(&entry_path) && !is_excluded(&entry_path, current_directory, main) {
+            targets.push(FileTarget {
+                path: entry_path,
+                project_root: false,
+            });
         }
     }
 
@@ -177,14 +185,18 @@ fn collect_targets(
 }
 
 fn is_cmake_file(path: &Path) -> bool {
-    path.file_name().is_some_and(|file_name| file_name == "CMakeLists.txt")
-        || path.extension().is_some_and(|extension| extension == "cmake")
+    path.file_name()
+        .is_some_and(|file_name| file_name == "CMakeLists.txt")
+        || path
+            .extension()
+            .is_some_and(|extension| extension == "cmake")
 }
 
 fn is_excluded(path: &Path, current_directory: &Path, main: &MainConfiguration) -> bool {
-    path
-        .strip_prefix(current_directory)
-        .map_or_else(|_| main.is_path_excluded(path), |relative| main.is_path_excluded(relative))
+    path.strip_prefix(current_directory).map_or_else(
+        |_| main.is_path_excluded(path),
+        |relative| main.is_path_excluded(relative),
+    )
 }
 
 fn relative_match_path(path: &Path, current_directory: &Path) -> PathBuf {

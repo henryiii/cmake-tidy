@@ -21,7 +21,8 @@ fn format_removes_trailing_spaces() -> Result<()> {
 
     assert_eq!(output.status.code(), Some(0));
     assert_eq!(
-        fs::read_to_string(&cmakelists).with_context(|| format!("failed to read {}", cmakelists.display()))?,
+        fs::read_to_string(&cmakelists)
+            .with_context(|| format!("failed to read {}", cmakelists.display()))?,
         "project(example)\nadd_subdirectory(src)\n"
     );
 
@@ -44,7 +45,8 @@ fn format_preserves_multiline_string_contents() -> Result<()> {
 
     assert_eq!(output.status.code(), Some(0));
     assert_eq!(
-        fs::read_to_string(&cmakelists).with_context(|| format!("failed to read {}", cmakelists.display()))?,
+        fs::read_to_string(&cmakelists)
+            .with_context(|| format!("failed to read {}", cmakelists.display()))?,
         source
     );
 
@@ -66,7 +68,8 @@ fn format_removes_space_before_paren_and_trims_eof_blank_lines() -> Result<()> {
 
     assert_eq!(output.status.code(), Some(0));
     assert_eq!(
-        fs::read_to_string(&cmakelists).with_context(|| format!("failed to read {}", cmakelists.display()))?,
+        fs::read_to_string(&cmakelists)
+            .with_context(|| format!("failed to read {}", cmakelists.display()))?,
         "message(STATUS \"hi\")\n"
     );
 
@@ -94,7 +97,8 @@ fn format_can_preserve_space_before_paren_via_config() -> Result<()> {
 
     assert_eq!(output.status.code(), Some(0));
     assert_eq!(
-        fs::read_to_string(&cmakelists).with_context(|| format!("failed to read {}", cmakelists.display()))?,
+        fs::read_to_string(&cmakelists)
+            .with_context(|| format!("failed to read {}", cmakelists.display()))?,
         "message (STATUS \"hi\")\n"
     );
 

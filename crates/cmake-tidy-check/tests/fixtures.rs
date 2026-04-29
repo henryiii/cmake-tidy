@@ -54,16 +54,16 @@ fn visit_directories(path: &Path, files: &mut Vec<PathBuf>) {
 
     for entry in entries {
         let entry = entry.unwrap_or_else(|error| {
-            panic!(
-                "failed to read entry under {}: {error}",
-                path.display()
-            )
+            panic!("failed to read entry under {}: {error}", path.display())
         });
         let entry_path = entry.path();
 
         if entry.file_type().is_ok_and(|file_type| file_type.is_dir()) {
             visit_directories(&entry_path, files);
-        } else if entry_path.file_name().is_some_and(|name| name == "CMakeLists.txt") {
+        } else if entry_path
+            .file_name()
+            .is_some_and(|name| name == "CMakeLists.txt")
+        {
             files.push(entry_path);
         }
     }

@@ -14,7 +14,7 @@ struct Lexer<'a> {
 }
 
 impl<'a> Lexer<'a> {
-    fn new(source: &'a str) -> Self {
+    const fn new(source: &'a str) -> Self {
         Self {
             cursor: Cursor::new(source),
         }
@@ -28,15 +28,24 @@ impl<'a> Lexer<'a> {
             let token = match self.cursor.peek_char() {
                 Some('(') => {
                     self.cursor.bump_char();
-                    Token::new(TokenKind::LeftParen, TextRange::new(start, self.cursor.offset()))
+                    Token::new(
+                        TokenKind::LeftParen,
+                        TextRange::new(start, self.cursor.offset()),
+                    )
                 }
                 Some(')') => {
                     self.cursor.bump_char();
-                    Token::new(TokenKind::RightParen, TextRange::new(start, self.cursor.offset()))
+                    Token::new(
+                        TokenKind::RightParen,
+                        TextRange::new(start, self.cursor.offset()),
+                    )
                 }
                 Some('\n') => {
                     self.cursor.bump_char();
-                    Token::new(TokenKind::Newline, TextRange::new(start, self.cursor.offset()))
+                    Token::new(
+                        TokenKind::Newline,
+                        TextRange::new(start, self.cursor.offset()),
+                    )
                 }
                 Some('\r') => {
                     if self.cursor.starts_with("\r\n") {
@@ -44,7 +53,10 @@ impl<'a> Lexer<'a> {
                     } else {
                         self.cursor.bump_char();
                     }
-                    Token::new(TokenKind::Newline, TextRange::new(start, self.cursor.offset()))
+                    Token::new(
+                        TokenKind::Newline,
+                        TextRange::new(start, self.cursor.offset()),
+                    )
                 }
                 Some(' ' | '\t' | '\u{0C}') => self.lex_whitespace(start),
                 Some('#') => self.lex_comment(start),
@@ -70,7 +82,10 @@ impl<'a> Lexer<'a> {
         }
 
         let text = self.cursor.slice(start, self.cursor.offset()).to_owned();
-        Token::new(TokenKind::Whitespace(text), TextRange::new(start, self.cursor.offset()))
+        Token::new(
+            TokenKind::Whitespace(text),
+            TextRange::new(start, self.cursor.offset()),
+        )
     }
 
     fn lex_comment(&mut self, start: usize) -> Token {
@@ -82,7 +97,10 @@ impl<'a> Lexer<'a> {
         }
 
         let text = self.cursor.slice(start, self.cursor.offset()).to_owned();
-        Token::new(TokenKind::Comment(text), TextRange::new(start, self.cursor.offset()))
+        Token::new(
+            TokenKind::Comment(text),
+            TextRange::new(start, self.cursor.offset()),
+        )
     }
 
     fn lex_quoted_argument(&mut self, start: usize) -> Token {
@@ -168,7 +186,7 @@ fn bracket_open_len(text: &str) -> Option<usize> {
     }
 }
 
-fn is_bare_terminator(character: char) -> bool {
+const fn is_bare_terminator(character: char) -> bool {
     matches!(
         character,
         '(' | ')' | '#' | ' ' | '\t' | '\n' | '\r' | '\u{0C}'
@@ -187,4 +205,3 @@ fn is_identifier(text: &str) -> bool {
 
     characters.all(|character| character == '_' || character.is_ascii_alphanumeric())
 }
-

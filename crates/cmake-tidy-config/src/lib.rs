@@ -9,23 +9,12 @@ use thiserror::Error;
 
 const CONFIG_FILENAMES: [&str; 3] = ["cmake-tidy.toml", ".cmake-tidy.toml", "pyproject.toml"];
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Configuration {
     pub source: Option<PathBuf>,
     pub main: MainConfiguration,
     pub lint: LintConfiguration,
     pub format: FormatConfiguration,
-}
-
-impl Default for Configuration {
-    fn default() -> Self {
-        Self {
-            source: None,
-            main: MainConfiguration::default(),
-            lint: LintConfiguration::default(),
-            format: FormatConfiguration::default(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -72,14 +61,8 @@ impl Default for LintConfiguration {
 impl LintConfiguration {
     #[must_use]
     pub fn is_rule_enabled(&self, code: &str) -> bool {
-        let selected = self
-            .select
-            .iter()
-            .any(|selector| selector.matches(code));
-        let ignored = self
-            .ignore
-            .iter()
-            .any(|selector| selector.matches(code));
+        let selected = self.select.iter().any(|selector| selector.matches(code));
+        let ignored = self.ignore.iter().any(|selector| selector.matches(code));
         selected && !ignored
     }
 
@@ -103,8 +86,7 @@ impl PerFileIgnore {
     #[must_use]
     pub fn matches(&self, path: &Path, code: &str) -> bool {
         let normalized = path.to_string_lossy().replace('\\', "/");
-        Pattern::new(&self.pattern)
-            .is_ok_and(|pattern| pattern.matches(&normalized))
+        Pattern::new(&self.pattern).is_ok_and(|pattern| pattern.matches(&normalized))
             && self.selectors.iter().any(|selector| selector.matches(code))
     }
 }
@@ -172,7 +154,11 @@ impl FromStr for RuleSelector {
             return Ok(Self::All);
         }
 
-        if value.is_empty() || !value.chars().all(|character| character.is_ascii_uppercase() || character.is_ascii_digit()) {
+        if value.is_empty()
+            || !value
+                .chars()
+                .all(|character| character.is_ascii_uppercase() || character.is_ascii_digit())
+        {
             return Err(ConfigError::InvalidRuleSelector(value.to_owned()));
         }
 
@@ -186,7 +172,7 @@ impl<'de> Deserialize<'de> for RuleSelector {
         D: serde::Deserializer<'de>,
     {
         let value = String::deserialize(deserializer)?;
-        RuleSelector::from_str(&value).map_err(serde::de::Error::custom)
+        Self::from_str(&value).map_err(serde::de::Error::custom)
     }
 }
 
@@ -232,6 +218,11 @@ pub fn find_configuration(directory: &Path) -> Option<PathBuf> {
     None
 }
 
+/// Load configuration by discovering a supported config file in `directory`.
+///
+/// # Errors
+///
+/// Returns an error if a discovered configuration file cannot be read or parsed.
 pub fn load_configuration(directory: &Path) -> Result<Configuration, ConfigError> {
     for filename in CONFIG_FILENAMES {
         let path = directory.join(filename);
@@ -256,9 +247,17 @@ pub fn load_configuration(directory: &Path) -> Result<Configuration, ConfigError
     Ok(Configuration::default())
 }
 
+/// Load configuration from an explicit file path.
+///
+/// # Errors
+///
+/// Returns an error if the file cannot be read or parsed.
 pub fn load_configuration_from_file(path: &Path) -> Result<Configuration, ConfigError> {
     let content = read_file(path)?;
-    let raw = if path.file_name().is_some_and(|filename| filename == "pyproject.toml") {
+    let raw = if path
+        .file_name()
+        .is_some_and(|filename| filename == "pyproject.toml")
+    {
         parse_pyproject(&content, path)?
     } else {
         parse_standard_file(&content, path)?
@@ -282,10 +281,11 @@ fn parse_standard_file(content: &str, path: &Path) -> Result<RawConfiguration, C
 }
 
 fn parse_pyproject(content: &str, path: &Path) -> Result<RawConfiguration, ConfigError> {
-    let pyproject = toml::from_str::<Pyproject>(content).map_err(|source| ConfigError::ParseToml {
-        path: path.to_path_buf(),
-        source,
-    })?;
+    let pyproject =
+        toml::from_str::<Pyproject>(content).map_err(|source| ConfigError::ParseToml {
+            path: path.to_path_buf(),
+            source,
+        })?;
 
     pyproject
         .tool
@@ -333,10 +333,7 @@ fn normalize_configuration(
                 .unwrap_or_else(|| LintConfiguration::default().select),
             ignore: raw.lint.ignore.unwrap_or_default(),
             per_file_ignores,
-            function_name_case: raw
-                .lint
-                .function_name_case
-                .unwrap_or_else(NameCase::default),
+            function_name_case: raw.lint.function_name_case.unwrap_or_default(),
         },
         format: raw.format.into(),
     })
@@ -402,8 +399,7 @@ mod tests {
 
     use super::{
         ConfigError, LintConfiguration, NameCase, RuleSelector, find_configuration,
-        load_configuration,
-        load_configuration_from_file,
+        load_configuration, load_configuration_from_file,
     };
 
     static NEXT_TEMP_DIR: AtomicU64 = AtomicU64::new(0);
@@ -428,14 +424,19 @@ mod tests {
         assert_eq!(config.source, Some(directory.join("cmake-tidy.toml")));
         assert_eq!(
             config.main.exclude,
-            vec![PathBuf::from("build"), PathBuf::from("generated/output.cmake")]
+            vec![
+                PathBuf::from("build"),
+                PathBuf::from("generated/output.cmake")
+            ]
         );
         assert!(config.lint.is_rule_enabled("E001"));
         assert!(!config.lint.is_rule_enabled("W201"));
         assert!(config.lint.is_rule_enabled("W301"));
-        assert!(config
-            .lint
-            .is_rule_enabled_for_path(Path::new("src/CMakeLists.txt"), "W301"));
+        assert!(
+            config
+                .lint
+                .is_rule_enabled_for_path(Path::new("src/CMakeLists.txt"), "W301")
+        );
         assert_eq!(config.lint.function_name_case, NameCase::Lower);
         assert!(!config.main.fix);
     }
@@ -456,9 +457,11 @@ mod tests {
         assert!(!config.format.space_before_paren);
         assert!(config.main.fix);
         assert_eq!(config.lint.function_name_case, NameCase::Upper);
-        assert!(!config
-            .lint
-            .is_rule_enabled_for_path(Path::new("tests/example/CMakeLists.txt"), "W301"));
+        assert!(
+            !config
+                .lint
+                .is_rule_enabled_for_path(Path::new("tests/example/CMakeLists.txt"), "W301")
+        );
     }
 
     #[test]
@@ -477,9 +480,11 @@ mod tests {
         assert!(!config.lint.is_rule_enabled("W302"));
         assert!(!config.lint.is_rule_enabled("E001"));
         assert_eq!(config.lint.function_name_case, NameCase::Upper);
-        assert!(!config
-            .lint
-            .is_rule_enabled_for_path(Path::new("examples/CMakeLists.txt"), "W301"));
+        assert!(
+            !config
+                .lint
+                .is_rule_enabled_for_path(Path::new("examples/CMakeLists.txt"), "W301")
+        );
         assert!(!config.format.final_newline);
         assert!(config.format.space_before_paren);
     }
@@ -487,9 +492,18 @@ mod tests {
     #[test]
     fn discovers_configuration_in_precedence_order() {
         let directory = create_temp_dir();
-        write_file(&directory.join("pyproject.toml"), "[tool.cmake-tidy.lint]\nselect = [\"ALL\"]\n");
-        write_file(&directory.join(".cmake-tidy.toml"), "[lint]\nselect = [\"W\"]\n");
-        write_file(&directory.join("cmake-tidy.toml"), "[lint]\nselect = [\"E\"]\n");
+        write_file(
+            &directory.join("pyproject.toml"),
+            "[tool.cmake-tidy.lint]\nselect = [\"ALL\"]\n",
+        );
+        write_file(
+            &directory.join(".cmake-tidy.toml"),
+            "[lint]\nselect = [\"W\"]\n",
+        );
+        write_file(
+            &directory.join("cmake-tidy.toml"),
+            "[lint]\nselect = [\"E\"]\n",
+        );
 
         assert_eq!(
             find_configuration(&directory),
@@ -507,16 +521,21 @@ mod tests {
         let path = directory.join("pyproject.toml");
         write_file(&path, "[tool.other]\nvalue = true\n");
 
-        let error = load_configuration_from_file(&path).expect_err("pyproject should require tool.cmake-tidy");
+        let error = load_configuration_from_file(&path)
+            .expect_err("pyproject should require tool.cmake-tidy");
         assert!(matches!(error, ConfigError::MissingPyprojectSection));
     }
 
     #[test]
     fn pyproject_without_tool_section_is_ignored_during_discovery() {
         let directory = create_temp_dir();
-        write_file(&directory.join("pyproject.toml"), "[tool.other]\nvalue = true\n");
+        write_file(
+            &directory.join("pyproject.toml"),
+            "[tool.other]\nvalue = true\n",
+        );
 
-        let config = load_configuration(&directory).expect("missing tool section should be ignored");
+        let config =
+            load_configuration(&directory).expect("missing tool section should be ignored");
         assert_eq!(config.source, None);
         assert!(config.lint.is_rule_enabled("E001"));
     }
@@ -524,7 +543,10 @@ mod tests {
     #[test]
     fn invalid_selector_is_rejected() {
         let directory = create_temp_dir();
-        write_file(&directory.join("cmake-tidy.toml"), "[lint]\nselect = [\"e\"]\n");
+        write_file(
+            &directory.join("cmake-tidy.toml"),
+            "[lint]\nselect = [\"e\"]\n",
+        );
 
         let error = load_configuration(&directory).expect_err("invalid selector should fail");
         assert!(matches!(error, ConfigError::ParseToml { .. }));
@@ -552,7 +574,10 @@ mod tests {
         );
 
         let error = load_configuration(&directory).expect_err("invalid pattern should fail");
-        assert!(matches!(error, ConfigError::InvalidPerFileIgnorePattern { .. }));
+        assert!(matches!(
+            error,
+            ConfigError::InvalidPerFileIgnorePattern { .. }
+        ));
     }
 
     #[test]
@@ -564,10 +589,26 @@ mod tests {
         );
 
         let config = load_configuration(&directory).expect("exclude config should parse");
-        assert!(config.main.is_path_excluded(Path::new("build/CMakeLists.txt")));
-        assert!(config.main.is_path_excluded(Path::new("./build/output/config.cmake")));
-        assert!(config.main.is_path_excluded(Path::new("vendor/generated.cmake")));
-        assert!(!config.main.is_path_excluded(Path::new("src/CMakeLists.txt")));
+        assert!(
+            config
+                .main
+                .is_path_excluded(Path::new("build/CMakeLists.txt"))
+        );
+        assert!(
+            config
+                .main
+                .is_path_excluded(Path::new("./build/output/config.cmake"))
+        );
+        assert!(
+            config
+                .main
+                .is_path_excluded(Path::new("vendor/generated.cmake"))
+        );
+        assert!(
+            !config
+                .main
+                .is_path_excluded(Path::new("src/CMakeLists.txt"))
+        );
     }
 
     fn create_temp_dir() -> PathBuf {

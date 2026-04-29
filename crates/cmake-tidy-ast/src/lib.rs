@@ -78,4 +78,3 @@ pub struct ParenGroup {
     pub items: Vec<Argument>,
     pub range: TextRange,
 }
-

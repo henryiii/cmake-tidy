@@ -56,13 +56,12 @@ impl<'a> Parser<'a> {
     fn parse_statement(&mut self) -> Option<Statement> {
         let token = self.tokens.current()?;
 
-        match &token.kind {
-            TokenKind::Identifier(_) => self.parse_command_invocation().map(Statement::Command),
-            _ => {
-                self.error_here("expected a command name");
-                self.tokens.bump();
-                None
-            }
+        if let TokenKind::Identifier(_) = &token.kind {
+            self.parse_command_invocation().map(Statement::Command)
+        } else {
+            self.error_here("expected a command name");
+            self.tokens.bump();
+            None
         }
     }
 
@@ -161,7 +160,6 @@ impl<'a> Parser<'a> {
                 Some(Argument::Bracket(BracketArgument { text, range }))
             }
             TokenKind::LeftParen => self.parse_paren_group().map(Argument::ParenGroup),
-            TokenKind::RightParen => None,
             _ => None,
         }
     }
@@ -178,11 +176,10 @@ impl<'a> Parser<'a> {
     }
 
     fn error_here(&mut self, message: &str) {
-        let range = self
-            .tokens
-            .current()
-            .map(|token| token.range)
-            .unwrap_or(TextRange::new(self.source_len, self.source_len));
+        let range = self.tokens.current().map_or_else(
+            || TextRange::new(self.source_len, self.source_len),
+            |token| token.range,
+        );
         self.error_at(range, message);
     }
 
