@@ -1,0 +1,99 @@
+name: Docs
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build docs
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build rustdoc
+        run: cargo doc --workspace --no-deps
+
+      - name: Create Pages landing page
+        run: |
+          cat <<'EOF' > target/doc/index.html
+          <!doctype html>
+          <html lang="en">
+            <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1">
+              <title>cmake-tidy docs</title>
+              <style>
+                :root { color-scheme: light dark; }
+                body {
+                  font-family: system-ui, sans-serif;
+                  line-height: 1.5;
+                  margin: 2rem auto;
+                  max-width: 48rem;
+                  padding: 0 1rem;
+                }
+                code { font-family: ui-monospace, monospace; }
+              </style>
+            </head>
+            <body>
+              <h1>cmake-tidy documentation</h1>
+              <p>Generated API documentation for the current workspace.</p>
+              <ul>
+                <li><a href="./cmake_tidy/">cmake_tidy</a></li>
+                <li><a href="./cmake_tidy_ast/">cmake_tidy_ast</a></li>
+                <li><a href="./cmake_tidy_check/">cmake_tidy_check</a></li>
+                <li><a href="./cmake_tidy_config/">cmake_tidy_config</a></li>
+                <li><a href="./cmake_tidy_format/">cmake_tidy_format</a></li>
+                <li><a href="./cmake_tidy_lexer/">cmake_tidy_lexer</a></li>
+                <li><a href="./cmake_tidy_parser/">cmake_tidy_parser</a></li>
+              </ul>
+            </body>
+          </html>
+          EOF
+          touch target/doc/.nojekyll
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: target/doc
+
+  deploy:
+    name: Deploy docs
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
