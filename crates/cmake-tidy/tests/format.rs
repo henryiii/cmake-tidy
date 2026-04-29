@@ -107,6 +107,46 @@ fn format_can_preserve_space_before_paren_via_config() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn format_preserves_cmake_format_disabled_regions() -> Result<()> {
+    let source = concat!(
+        "project(example)\n",
+        "# cmake-format: off\n",
+        "message (STATUS \"hi\")   \n",
+        "\n",
+        "\n",
+        "# cmake-format: on\n",
+        "add_subdirectory(src)   \n",
+    );
+    let temp_dir = create_file(source)?;
+    let cmakelists = temp_dir.join("CMakeLists.txt");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cmake-tidy"))
+        .arg("format")
+        .arg(&temp_dir)
+        .output()
+        .context("failed to run cmake-tidy")?;
+
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(
+        fs::read_to_string(&cmakelists)
+            .with_context(|| format!("failed to read {}", cmakelists.display()))?,
+        concat!(
+            "project(example)\n",
+            "# cmake-format: off\n",
+            "message (STATUS \"hi\")   \n",
+            "\n",
+            "\n",
+            "# cmake-format: on\n",
+            "add_subdirectory(src)\n",
+        )
+    );
+
+    fs::remove_dir_all(&temp_dir)
+        .with_context(|| format!("failed to remove {}", temp_dir.display()))?;
+    Ok(())
+}
+
 fn create_file(contents: &str) -> Result<PathBuf> {
     let temp_dir = unique_temp_dir()?;
     fs::create_dir_all(&temp_dir)

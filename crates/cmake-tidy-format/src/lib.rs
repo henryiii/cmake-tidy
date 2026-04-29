@@ -1,6 +1,6 @@
 use cmake_tidy_ast::TextRange;
 use cmake_tidy_config::FormatConfiguration;
-use cmake_tidy_lexer::{TokenKind, tokenize};
+use cmake_tidy_lexer::{Token, TokenKind, tokenize};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FormatResult {
@@ -15,24 +15,113 @@ pub fn format_source(source: &str) -> FormatResult {
 
 #[must_use]
 pub fn format_source_with_options(source: &str, options: &FormatConfiguration) -> FormatResult {
-    let normalized_parens = normalize_space_before_paren(source, options.space_before_paren);
-    let protected_ranges = protected_ranges(&normalized_parens);
-    let output = normalize_lines(&normalized_parens, &protected_ranges, options);
+    let initial_protected_ranges = protected_ranges(source);
+    let normalized_parens = normalize_space_before_paren(
+        source,
+        &initial_protected_ranges,
+        options.space_before_paren,
+    );
+    let normalized_protected_ranges = protected_ranges(&normalized_parens);
+    let output = normalize_lines(&normalized_parens, &normalized_protected_ranges, options);
     let changed = output != source;
     FormatResult { output, changed }
 }
 
 fn protected_ranges(source: &str) -> Vec<TextRange> {
-    tokenize(source)
-        .into_iter()
+    let tokens = tokenize(source);
+    let mut ranges = tokens
+        .iter()
         .filter_map(|token| match token.kind {
             TokenKind::BracketArgument(_) => Some(token.range),
             _ => None,
         })
-        .collect()
+        .collect::<Vec<_>>();
+    ranges.extend(format_disabled_ranges(source, &tokens));
+    merge_ranges(ranges)
 }
 
-fn normalize_space_before_paren(source: &str, enabled: bool) -> String {
+fn format_disabled_ranges(source: &str, tokens: &[Token]) -> Vec<TextRange> {
+    let mut ranges = Vec::new();
+    let mut disabled_start = None;
+
+    for token in tokens {
+        let TokenKind::Comment(text) = &token.kind else {
+            continue;
+        };
+
+        if text.trim() == "# cmake-format: off" {
+            if disabled_start.is_none() {
+                disabled_start = Some(line_start(source, token.range.start));
+            }
+        } else if text.trim() == "# cmake-format: on"
+            && let Some(start) = disabled_start.take()
+        {
+            ranges.push(TextRange::new(start, line_end(source, token.range.end)));
+        }
+    }
+
+    if let Some(start) = disabled_start {
+        ranges.push(TextRange::new(start, source.len()));
+    }
+
+    ranges
+}
+
+fn merge_ranges(mut ranges: Vec<TextRange>) -> Vec<TextRange> {
+    if ranges.len() < 2 {
+        return ranges;
+    }
+
+    ranges.sort_by_key(|range| (range.start, range.end));
+    let mut merged: Vec<TextRange> = Vec::with_capacity(ranges.len());
+
+    for range in ranges {
+        if let Some(last) = merged.last_mut()
+            && range.start <= last.end
+        {
+            last.end = last.end.max(range.end);
+            continue;
+        }
+
+        merged.push(range);
+    }
+
+    merged
+}
+
+fn line_start(source: &str, offset: usize) -> usize {
+    let bytes = source.as_bytes();
+    let mut start = offset.min(bytes.len());
+
+    while start > 0 && !matches!(bytes[start - 1], b'\n' | b'\r') {
+        start -= 1;
+    }
+
+    start
+}
+
+fn line_end(source: &str, offset: usize) -> usize {
+    let bytes = source.as_bytes();
+    let mut end = offset.min(bytes.len());
+
+    while end < bytes.len() && !matches!(bytes[end], b'\n' | b'\r') {
+        end += 1;
+    }
+
+    if bytes.get(end) == Some(&b'\r') && bytes.get(end + 1) == Some(&b'\n') {
+        end + 2
+    } else if bytes.get(end).is_some() {
+        end + 1
+    } else {
+        end
+    }
+}
+
+fn normalize_space_before_paren(
+    source: &str,
+    protected_ranges: &[TextRange],
+    enabled: bool,
+) -> String {
     let tokens = tokenize(source);
     let mut output = String::with_capacity(source.len());
     let mut offset = 0;
@@ -48,6 +137,10 @@ fn normalize_space_before_paren(source: &str, enabled: bool) -> String {
                 && matches!(second.kind, TokenKind::Whitespace(_))
                 && matches!(third.kind, TokenKind::LeftParen)
                 && !source[second.range.start..second.range.end].contains(['\n', '\r'])
+                && !overlaps_protected_range(
+                    TextRange::new(first.range.start, third.range.end),
+                    protected_ranges,
+                )
             {
                 output.push_str(&source[offset..second.range.start]);
                 if enabled {
@@ -63,6 +156,10 @@ fn normalize_space_before_paren(source: &str, enabled: bool) -> String {
             && matches!(tokens[index].kind, TokenKind::Identifier(_))
             && matches!(tokens[index + 1].kind, TokenKind::LeftParen)
             && enabled
+            && !overlaps_protected_range(
+                TextRange::new(tokens[index].range.start, tokens[index + 1].range.end),
+                protected_ranges,
+            )
         {
             let insert_at = tokens[index + 1].range.start;
             output.push_str(&source[offset..insert_at]);
@@ -154,7 +251,11 @@ fn normalize_lines(
         }
     }
 
+    let protected_to_eof = protected_ranges
+        .iter()
+        .any(|range| range.end == source.len());
     if options.final_newline
+        && !protected_to_eof
         && (kept_lines.is_empty() || (!output.ends_with('\n') && !output.ends_with("\r\n")))
     {
         output.push_str(preferred_newline);
@@ -246,5 +347,44 @@ mod tests {
             result.output,
             "project(example)\n\n\nadd_subdirectory(src)\n"
         );
+    }
+
+    #[test]
+    fn preserves_disabled_regions_verbatim() {
+        let source = concat!(
+            "project(example)\n",
+            "# cmake-format: off\n",
+            "message (STATUS \"hi\")   \n",
+            "\n",
+            "\n",
+            "# cmake-format: on\n",
+            "add_subdirectory(src)   \n",
+        );
+        let result = format_source(source);
+        assert_eq!(
+            result.output,
+            concat!(
+                "project(example)\n",
+                "# cmake-format: off\n",
+                "message (STATUS \"hi\")   \n",
+                "\n",
+                "\n",
+                "# cmake-format: on\n",
+                "add_subdirectory(src)\n",
+            )
+        );
+        assert!(result.changed);
+    }
+
+    #[test]
+    fn preserves_unterminated_disabled_region_to_eof() {
+        let source = concat!(
+            "project(example)\n",
+            "# cmake-format: off\n",
+            "message (STATUS \"hi\")   "
+        );
+        let result = format_source(source);
+        assert_eq!(result.output, source);
+        assert!(!result.changed);
     }
 }

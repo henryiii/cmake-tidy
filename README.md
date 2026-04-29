@@ -65,6 +65,7 @@ Current formatting behavior:
 - normalizes spacing between command names and `(`
 - collapses consecutive blank lines
 - preserves bracket-argument contents verbatim
+- honors `# cmake-format: off` / `# cmake-format: on` regions verbatim
 
 ## Configuration
 
@@ -167,6 +168,19 @@ You can also suppress only specific rules for the whole file:
 ```cmake
 # noqa: W201,W301
 ```
+
+## Formatter disable regions
+
+`cmake-tidy format` supports `cmake-format`-compatible local disable markers:
+
+```cmake
+# cmake-format: off
+message (STATUS "leave this spacing alone")   
+# cmake-format: on
+```
+
+Code inside a disabled region is preserved verbatim. Formatting resumes after the matching
+`# cmake-format: on`. If `off` is unmatched, formatting stays disabled until end of file.
 
 ## Notes
 
