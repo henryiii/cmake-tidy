@@ -115,6 +115,63 @@ fn check_respects_file_level_noqa() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn check_can_fix_naming_from_cli() -> Result<()> {
+    let temp_dir = create_root_file("ADD_LIBRARY(example STATIC main.cpp)\n")?;
+    let cmakelists = temp_dir.join("CMakeLists.txt");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cmake-tidy"))
+        .arg("check")
+        .arg("--select")
+        .arg("N")
+        .arg("--fix")
+        .arg(&temp_dir)
+        .output()
+        .context("failed to run cmake-tidy")?;
+
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stdout.is_empty());
+    assert_eq!(
+        fs::read_to_string(&cmakelists)
+            .with_context(|| format!("failed to read {}", cmakelists.display()))?,
+        "add_library(example STATIC main.cpp)\n"
+    );
+
+    fs::remove_dir_all(&temp_dir)
+        .with_context(|| format!("failed to remove {}", temp_dir.display()))?;
+    Ok(())
+}
+
+#[test]
+fn check_can_fix_naming_from_config() -> Result<()> {
+    let temp_dir = create_root_file("add_library(example STATIC main.cpp)\n")?;
+    let cmakelists = temp_dir.join("CMakeLists.txt");
+    fs::write(
+        temp_dir.join("cmake-tidy.toml"),
+        "fix = true\n[lint]\nselect = [\"N\"]\nfunction-name-case = \"upper\"\n",
+    )
+    .with_context(|| format!("failed to write {}", temp_dir.display()))?;
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cmake-tidy"))
+        .current_dir(&temp_dir)
+        .arg("check")
+        .arg(&temp_dir)
+        .output()
+        .context("failed to run cmake-tidy")?;
+
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stdout.is_empty());
+    assert_eq!(
+        fs::read_to_string(&cmakelists)
+            .with_context(|| format!("failed to read {}", cmakelists.display()))?,
+        "ADD_LIBRARY(example STATIC main.cpp)\n"
+    );
+
+    fs::remove_dir_all(&temp_dir)
+        .with_context(|| format!("failed to remove {}", temp_dir.display()))?;
+    Ok(())
+}
+
 fn create_root_file(contents: &str) -> Result<PathBuf> {
     let temp_dir = unique_temp_dir()?;
     fs::create_dir_all(&temp_dir)

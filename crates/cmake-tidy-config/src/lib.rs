@@ -30,6 +30,7 @@ impl Default for Configuration {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct MainConfiguration {
     pub exclude: Vec<PathBuf>,
+    pub fix: bool,
 }
 
 impl MainConfiguration {
@@ -52,6 +53,7 @@ impl MainConfiguration {
 pub struct LintConfiguration {
     pub select: Vec<RuleSelector>,
     pub ignore: Vec<RuleSelector>,
+    pub function_name_case: NameCase,
 }
 
 impl Default for LintConfiguration {
@@ -59,6 +61,7 @@ impl Default for LintConfiguration {
         Self {
             select: vec![RuleSelector::prefix("E"), RuleSelector::prefix("W")],
             ignore: Vec::new(),
+            function_name_case: NameCase::default(),
         }
     }
 }
@@ -76,6 +79,14 @@ impl LintConfiguration {
             .any(|selector| selector.matches(code));
         selected && !ignored
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum NameCase {
+    #[default]
+    Lower,
+    Upper,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -262,6 +273,7 @@ fn normalize_configuration(raw: RawConfiguration, source: Option<PathBuf>) -> Co
         source,
         main: MainConfiguration {
             exclude: raw.exclude.unwrap_or_default(),
+            fix: raw.fix.unwrap_or_default(),
         },
         lint: LintConfiguration {
             select: raw
@@ -269,6 +281,10 @@ fn normalize_configuration(raw: RawConfiguration, source: Option<PathBuf>) -> Co
                 .select
                 .unwrap_or_else(|| LintConfiguration::default().select),
             ignore: raw.lint.ignore.unwrap_or_default(),
+            function_name_case: raw
+                .lint
+                .function_name_case
+                .unwrap_or_else(NameCase::default),
         },
         format: raw.format.into(),
     }
@@ -277,6 +293,7 @@ fn normalize_configuration(raw: RawConfiguration, source: Option<PathBuf>) -> Co
 #[derive(Debug, Deserialize, Default)]
 struct RawConfiguration {
     exclude: Option<Vec<PathBuf>>,
+    fix: Option<bool>,
     #[serde(default)]
     lint: RawLintConfiguration,
     #[serde(default)]
@@ -284,9 +301,11 @@ struct RawConfiguration {
 }
 
 #[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
 struct RawLintConfiguration {
     select: Option<Vec<RuleSelector>>,
     ignore: Option<Vec<RuleSelector>>,
+    function_name_case: Option<NameCase>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -329,7 +348,8 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::{
-        ConfigError, LintConfiguration, RuleSelector, find_configuration, load_configuration,
+        ConfigError, LintConfiguration, NameCase, RuleSelector, find_configuration,
+        load_configuration,
         load_configuration_from_file,
     };
 
@@ -360,6 +380,8 @@ mod tests {
         assert!(config.lint.is_rule_enabled("E001"));
         assert!(!config.lint.is_rule_enabled("W201"));
         assert!(config.lint.is_rule_enabled("W301"));
+        assert_eq!(config.lint.function_name_case, NameCase::Lower);
+        assert!(!config.main.fix);
     }
 
     #[test]
@@ -367,7 +389,7 @@ mod tests {
         let directory = create_temp_dir();
         write_file(
             &directory.join(".cmake-tidy.toml"),
-            "[lint]\nselect = [\"W301\"]\n[format]\nmax-blank-lines = 2\n",
+            "fix = true\n[lint]\nselect = [\"W301\"]\nfunction-name-case = \"upper\"\n[format]\nmax-blank-lines = 2\n",
         );
 
         let config = load_configuration(&directory).expect("hidden config should parse");
@@ -376,6 +398,8 @@ mod tests {
         assert!(!config.lint.is_rule_enabled("W302"));
         assert_eq!(config.format.max_blank_lines, 2);
         assert!(!config.format.space_before_paren);
+        assert!(config.main.fix);
+        assert_eq!(config.lint.function_name_case, NameCase::Upper);
     }
 
     #[test]
@@ -383,15 +407,17 @@ mod tests {
         let directory = create_temp_dir();
         write_file(
             &directory.join("pyproject.toml"),
-            "[tool.cmake-tidy]\nexclude = [\"third_party\"]\n\n[tool.cmake-tidy.lint]\nselect = [\"W3\"]\nignore = [\"W302\"]\n\n[tool.cmake-tidy.format]\nfinal-newline = false\nspace-before-paren = true\n",
+            "[tool.cmake-tidy]\nexclude = [\"third_party\"]\nfix = true\n\n[tool.cmake-tidy.lint]\nselect = [\"W3\"]\nignore = [\"W302\"]\nfunction-name-case = \"upper\"\n\n[tool.cmake-tidy.format]\nfinal-newline = false\nspace-before-paren = true\n",
         );
 
         let config = load_configuration(&directory).expect("pyproject config should parse");
         assert_eq!(config.source, Some(directory.join("pyproject.toml")));
         assert_eq!(config.main.exclude, vec![PathBuf::from("third_party")]);
+        assert!(config.main.fix);
         assert!(config.lint.is_rule_enabled("W301"));
         assert!(!config.lint.is_rule_enabled("W302"));
         assert!(!config.lint.is_rule_enabled("E001"));
+        assert_eq!(config.lint.function_name_case, NameCase::Upper);
         assert!(!config.format.final_newline);
         assert!(config.format.space_before_paren);
     }
@@ -447,6 +473,7 @@ mod tests {
         let lint = LintConfiguration {
             select: vec![RuleSelector::All],
             ignore: vec![RuleSelector::prefix("W2")],
+            function_name_case: NameCase::Lower,
         };
 
         assert!(lint.is_rule_enabled("E001"));

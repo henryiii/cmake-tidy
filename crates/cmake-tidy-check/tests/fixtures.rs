@@ -2,6 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use cmake_tidy_check::{CheckOptions, RuleCode, check_source};
+use cmake_tidy_config::NameCase;
 
 #[test]
 fn fixture_files_do_not_trigger_parse_errors() {
@@ -24,6 +25,7 @@ fn fixture_files_do_not_trigger_parse_errors() {
             &source,
             &CheckOptions {
                 project_root: false,
+                function_name_case: NameCase::Lower,
             },
         );
 

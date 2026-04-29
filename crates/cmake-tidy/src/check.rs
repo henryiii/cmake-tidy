@@ -2,11 +2,21 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use cmake_tidy_check::{CheckOptions, Diagnostic, check_source};
-use cmake_tidy_config::LintConfiguration;
+use cmake_tidy_check::{CheckOptions, Diagnostic, apply_fixes, check_source};
+use cmake_tidy_config::{LintConfiguration, MainConfiguration, RuleSelector, load_configuration};
 
-pub(crate) fn run(paths: Vec<PathBuf>, lint: LintConfiguration) -> Result<bool> {
-    let targets = discover_targets(&paths)?;
+pub(crate) fn run(
+    paths: Vec<PathBuf>,
+    select: Vec<RuleSelector>,
+    ignore: Vec<RuleSelector>,
+    fix: bool,
+) -> Result<bool> {
+    let current_directory = std::env::current_dir().context("failed to read current directory")?;
+    let configuration = load_configuration(&current_directory)
+        .with_context(|| format!("failed to load configuration from {}", current_directory.display()))?;
+    let lint = build_lint_configuration(&configuration.lint, select, ignore);
+    let fix_enabled = fix || configuration.main.fix;
+    let targets = discover_targets(&paths, &current_directory, &configuration.main)?;
     if targets.is_empty() {
         bail!("no CMake files found");
     }
@@ -16,24 +26,32 @@ pub(crate) fn run(paths: Vec<PathBuf>, lint: LintConfiguration) -> Result<bool> 
     for target in targets {
         let source = fs::read_to_string(&target.path)
             .with_context(|| format!("failed to read CMake file: {}", target.path.display()))?;
-        let result = check_source(
-            &source,
-            &CheckOptions {
-                project_root: target.project_root,
-            },
-        );
+        let options = CheckOptions {
+            project_root: target.project_root,
+            function_name_case: configuration.lint.function_name_case,
+        };
+        let mut diagnostics = filter_diagnostics(check_source(&source, &options).diagnostics, &lint);
 
-        let diagnostics = result
-            .diagnostics
-            .into_iter()
-            .filter(|diagnostic| lint.is_rule_enabled(&diagnostic.code.to_string()))
-            .collect::<Vec<_>>();
+        let current_source = if fix_enabled {
+            if let Some(fixed) = apply_fixes(&source, &diagnostics) {
+                fs::write(&target.path, &fixed)
+                    .with_context(|| format!("failed to write fixed file: {}", target.path.display()))?;
+                filter_diagnostics(check_source(&fixed, &options).diagnostics, &lint);
+                fixed
+            } else {
+                source
+            }
+        } else {
+            source
+        };
+
+        diagnostics = filter_diagnostics(check_source(&current_source, &options).diagnostics, &lint);
 
         if diagnostics.is_empty() {
             continue;
         }
 
-        let source_index = SourceIndex::new(&source);
+        let source_index = SourceIndex::new(&current_source);
         for diagnostic in diagnostics {
             found_diagnostics = true;
             print_diagnostic(&target.path, &source_index, &diagnostic);
@@ -49,11 +67,37 @@ struct FileTarget {
     project_root: bool,
 }
 
-fn discover_targets(paths: &[PathBuf]) -> Result<Vec<FileTarget>> {
+fn build_lint_configuration(
+    base: &LintConfiguration,
+    select: Vec<RuleSelector>,
+    ignore: Vec<RuleSelector>,
+) -> LintConfiguration {
+    let mut lint = base.clone();
+    if !select.is_empty() {
+        lint.select = select;
+    }
+    if !ignore.is_empty() {
+        lint.ignore = ignore;
+    }
+    lint
+}
+
+fn filter_diagnostics(diagnostics: Vec<Diagnostic>, lint: &LintConfiguration) -> Vec<Diagnostic> {
+    diagnostics
+        .into_iter()
+        .filter(|diagnostic| lint.is_rule_enabled(&diagnostic.code.to_string()))
+        .collect()
+}
+
+fn discover_targets(
+    paths: &[PathBuf],
+    current_directory: &Path,
+    main: &MainConfiguration,
+) -> Result<Vec<FileTarget>> {
     let mut targets = Vec::new();
 
     for path in paths {
-        collect_targets(path, path, &mut targets)?;
+        collect_targets(path, path, current_directory, main, &mut targets)?;
     }
 
     targets.sort();
@@ -61,20 +105,28 @@ fn discover_targets(paths: &[PathBuf]) -> Result<Vec<FileTarget>> {
     Ok(targets)
 }
 
-fn collect_targets(input_path: &Path, current_path: &Path, targets: &mut Vec<FileTarget>) -> Result<()> {
+fn collect_targets(
+    input_path: &Path,
+    current_path: &Path,
+    current_directory: &Path,
+    main: &MainConfiguration,
+    targets: &mut Vec<FileTarget>,
+) -> Result<()> {
     let metadata = fs::metadata(current_path)
         .with_context(|| format!("failed to read file metadata: {}", current_path.display()))?;
 
     if metadata.is_file() {
-        targets.push(FileTarget {
-            path: current_path.to_path_buf(),
-            project_root: current_path.file_name().is_some_and(|file_name| file_name == "CMakeLists.txt"),
-        });
+        if !is_excluded(current_path, current_directory, main) {
+            targets.push(FileTarget {
+                path: current_path.to_path_buf(),
+                project_root: current_path.file_name().is_some_and(|file_name| file_name == "CMakeLists.txt"),
+            });
+        }
         return Ok(());
     }
 
     let root_cmakelists = current_path.join("CMakeLists.txt");
-    if root_cmakelists.is_file() {
+    if root_cmakelists.is_file() && !is_excluded(&root_cmakelists, current_directory, main) {
         targets.push(FileTarget {
             path: root_cmakelists,
             project_root: true,
@@ -89,7 +141,7 @@ fn collect_targets(input_path: &Path, current_path: &Path, targets: &mut Vec<Fil
         let entry_path = entry.path();
 
         if entry.file_type().is_ok_and(|file_type| file_type.is_dir()) {
-            collect_targets(input_path, &entry_path, targets)?;
+            collect_targets(input_path, &entry_path, current_directory, main, targets)?;
             continue;
         }
 
@@ -100,10 +152,12 @@ fn collect_targets(input_path: &Path, current_path: &Path, targets: &mut Vec<Fil
         }
 
         if is_cmake_file(&entry_path) {
-            targets.push(FileTarget {
-                path: entry_path,
-                project_root: false,
-            });
+            if !is_excluded(&entry_path, current_directory, main) {
+                targets.push(FileTarget {
+                    path: entry_path,
+                    project_root: false,
+                });
+            }
         }
     }
 
@@ -113,6 +167,12 @@ fn collect_targets(input_path: &Path, current_path: &Path, targets: &mut Vec<Fil
 fn is_cmake_file(path: &Path) -> bool {
     path.file_name().is_some_and(|file_name| file_name == "CMakeLists.txt")
         || path.extension().is_some_and(|extension| extension == "cmake")
+}
+
+fn is_excluded(path: &Path, current_directory: &Path, main: &MainConfiguration) -> bool {
+    path
+        .strip_prefix(current_directory)
+        .map_or_else(|_| main.is_path_excluded(path), |relative| main.is_path_excluded(relative))
 }
 
 fn print_diagnostic(path: &Path, source_index: &SourceIndex, diagnostic: &Diagnostic) {

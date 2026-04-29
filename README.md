@@ -23,6 +23,7 @@ Current rules:
 | Code | Description |
 | --- | --- |
 | `E001` | Parse error |
+| `N001` | Command/function name case does not match the configured naming style |
 | `W201` | Duplicate `cmake_minimum_required()` |
 | `W202` | Duplicate `project()` |
 | `W203` | Empty `project()` |
@@ -33,15 +34,18 @@ Supported selector flags:
 
 - `--select E,W301`
 - `--ignore W203`
+- `--fix`
 
 Selector behavior is Ruff-style:
 
 - `E` selects all `E***` rules
+- `N` selects all `N***` rules
 - `W3` selects all `W3**` rules
 - exact codes like `W203` are supported
 - `ALL` selects all rules
 - `--select` replaces the default selection when provided
 - `--ignore` subtracts from the active set
+- `--fix` applies available autofixes in place
 
 Default lint selection:
 
@@ -89,9 +93,12 @@ exclude = ["build", "third_party"]
 ### Lint settings
 
 ```toml
+fix = false
+
 [lint]
 select = ["E", "W"]
 ignore = ["W203"]
+function-name-case = "lower"
 ```
 
 ### Format settings
@@ -116,10 +123,12 @@ Current format settings:
 ```toml
 [tool.cmake-tidy]
 exclude = ["build", "vendor"]
+fix = false
 
 [tool.cmake-tidy.lint]
 select = ["E", "W"]
 ignore = ["W203"]
+function-name-case = "lower"
 
 [tool.cmake-tidy.format]
 final-newline = true
@@ -155,4 +164,5 @@ You can also suppress only specific rules for the whole file:
 
 - Root-only project checks are applied to the discovered root `CMakeLists.txt`.
 - Bracket arguments are intentionally preserved verbatim during formatting for now.
+- The naming rule family is opt-in; it is not selected by default because default lint selection remains `["E", "W"]`.
 - The architecture notes for longer-term design live in [`ARCHETECTURE.md`](ARCHETECTURE.md).

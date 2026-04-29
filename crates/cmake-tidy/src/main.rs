@@ -7,7 +7,7 @@ use std::process::ExitCode;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use cmake_tidy_config::{LintConfiguration, RuleSelector};
+use cmake_tidy_config::RuleSelector;
 use cmake_tidy_parser::parse_file;
 
 #[derive(Debug, Parser)]
@@ -24,6 +24,8 @@ enum Command {
         select: Vec<RuleSelector>,
         #[arg(long, value_delimiter = ',', action = clap::ArgAction::Append)]
         ignore: Vec<RuleSelector>,
+        #[arg(long)]
+        fix: bool,
         paths: Vec<PathBuf>,
     },
     Format {
@@ -47,8 +49,9 @@ fn main() -> ExitCode {
         Command::Check {
             select,
             ignore,
+            fix,
             paths,
-        } => check::run(paths, build_lint_configuration(select, ignore))
+        } => check::run(paths, select, ignore, fix)
             .map(ExitStatus::from_has_diagnostics),
         Command::Format { paths } => format::run(paths).map(|_| ExitStatus::Success),
         Command::Debug { command } => match command {
@@ -64,20 +67,6 @@ fn main() -> ExitCode {
             ExitCode::from(2)
         }
     }
-}
-
-fn build_lint_configuration(
-    select: Vec<RuleSelector>,
-    ignore: Vec<RuleSelector>,
-) -> LintConfiguration {
-    let mut lint = LintConfiguration::default();
-    if !select.is_empty() {
-        lint.select = select;
-    }
-    if !ignore.is_empty() {
-        lint.ignore = ignore;
-    }
-    lint
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
