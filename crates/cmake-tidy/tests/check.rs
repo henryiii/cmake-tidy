@@ -172,6 +172,33 @@ fn check_can_fix_naming_from_config() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn check_respects_per_file_ignores_from_config() -> Result<()> {
+    let temp_dir = create_root_file("project()\nproject(example)\n")?;
+    fs::write(
+        temp_dir.join("cmake-tidy.toml"),
+        "[lint]\nselect = [\"W\"]\n\n[lint.per-file-ignores]\n\"CMakeLists.txt\" = [\"W203\", \"W301\"]\n",
+    )
+    .with_context(|| format!("failed to write {}", temp_dir.display()))?;
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cmake-tidy"))
+        .current_dir(&temp_dir)
+        .arg("check")
+        .arg(&temp_dir)
+        .output()
+        .context("failed to run cmake-tidy")?;
+
+    assert_eq!(output.status.code(), Some(1));
+    let stdout = String::from_utf8(output.stdout).context("stdout should be valid UTF-8")?;
+    assert!(stdout.contains("W202"));
+    assert!(!stdout.contains("W203"));
+    assert!(!stdout.contains("W301"));
+
+    fs::remove_dir_all(&temp_dir)
+        .with_context(|| format!("failed to remove {}", temp_dir.display()))?;
+    Ok(())
+}
+
 fn create_root_file(contents: &str) -> Result<PathBuf> {
     let temp_dir = unique_temp_dir()?;
     fs::create_dir_all(&temp_dir)

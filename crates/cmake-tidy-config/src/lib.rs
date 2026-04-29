@@ -3,6 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
+use glob::Pattern;
 use serde::Deserialize;
 use thiserror::Error;
 
@@ -53,6 +54,7 @@ impl MainConfiguration {
 pub struct LintConfiguration {
     pub select: Vec<RuleSelector>,
     pub ignore: Vec<RuleSelector>,
+    pub per_file_ignores: Vec<PerFileIgnore>,
     pub function_name_case: NameCase,
 }
 
@@ -61,6 +63,7 @@ impl Default for LintConfiguration {
         Self {
             select: vec![RuleSelector::prefix("E"), RuleSelector::prefix("W")],
             ignore: Vec::new(),
+            per_file_ignores: Vec::new(),
             function_name_case: NameCase::default(),
         }
     }
@@ -78,6 +81,31 @@ impl LintConfiguration {
             .iter()
             .any(|selector| selector.matches(code));
         selected && !ignored
+    }
+
+    #[must_use]
+    pub fn is_rule_enabled_for_path(&self, path: &Path, code: &str) -> bool {
+        self.is_rule_enabled(code)
+            && !self
+                .per_file_ignores
+                .iter()
+                .any(|ignore| ignore.matches(path, code))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PerFileIgnore {
+    pub pattern: String,
+    pub selectors: Vec<RuleSelector>,
+}
+
+impl PerFileIgnore {
+    #[must_use]
+    pub fn matches(&self, path: &Path, code: &str) -> bool {
+        let normalized = path.to_string_lossy().replace('\\', "/");
+        Pattern::new(&self.pattern)
+            .is_ok_and(|pattern| pattern.matches(&normalized))
+            && self.selectors.iter().any(|selector| selector.matches(code))
     }
 }
 
@@ -180,6 +208,12 @@ pub enum ConfigError {
     MissingPyprojectSection,
     #[error("invalid rule selector `{0}`")]
     InvalidRuleSelector(String),
+    #[error("invalid per-file-ignore pattern `{pattern}`")]
+    InvalidPerFileIgnorePattern {
+        pattern: String,
+        #[source]
+        source: glob::PatternError,
+    },
 }
 
 #[must_use]
@@ -211,12 +245,12 @@ pub fn load_configuration(directory: &Path) -> Result<Configuration, ConfigError
             }
             let content = read_file(&path)?;
             let raw = parse_pyproject(&content, &path)?;
-            return Ok(normalize_configuration(raw, Some(path)));
+            return normalize_configuration(raw, Some(path));
         }
 
         let content = read_file(&path)?;
         let raw = parse_standard_file(&content, &path)?;
-        return Ok(normalize_configuration(raw, Some(path)));
+        return normalize_configuration(raw, Some(path));
     }
 
     Ok(Configuration::default())
@@ -230,7 +264,7 @@ pub fn load_configuration_from_file(path: &Path) -> Result<Configuration, Config
         parse_standard_file(&content, path)?
     };
 
-    Ok(normalize_configuration(raw, Some(path.to_path_buf())))
+    normalize_configuration(raw, Some(path.to_path_buf()))
 }
 
 fn read_file(path: &Path) -> Result<String, ConfigError> {
@@ -268,8 +302,25 @@ fn pyproject_has_section(path: &Path) -> Result<Option<RawConfiguration>, Config
     }
 }
 
-fn normalize_configuration(raw: RawConfiguration, source: Option<PathBuf>) -> Configuration {
-    Configuration {
+fn normalize_configuration(
+    raw: RawConfiguration,
+    source: Option<PathBuf>,
+) -> Result<Configuration, ConfigError> {
+    let per_file_ignores = raw
+        .lint
+        .per_file_ignores
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(pattern, selectors)| {
+            Pattern::new(&pattern).map_err(|source| ConfigError::InvalidPerFileIgnorePattern {
+                pattern: pattern.clone(),
+                source,
+            })?;
+            Ok(PerFileIgnore { pattern, selectors })
+        })
+        .collect::<Result<Vec<_>, ConfigError>>()?;
+
+    Ok(Configuration {
         source,
         main: MainConfiguration {
             exclude: raw.exclude.unwrap_or_default(),
@@ -281,13 +332,14 @@ fn normalize_configuration(raw: RawConfiguration, source: Option<PathBuf>) -> Co
                 .select
                 .unwrap_or_else(|| LintConfiguration::default().select),
             ignore: raw.lint.ignore.unwrap_or_default(),
+            per_file_ignores,
             function_name_case: raw
                 .lint
                 .function_name_case
                 .unwrap_or_else(NameCase::default),
         },
         format: raw.format.into(),
-    }
+    })
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -305,6 +357,7 @@ struct RawConfiguration {
 struct RawLintConfiguration {
     select: Option<Vec<RuleSelector>>,
     ignore: Option<Vec<RuleSelector>>,
+    per_file_ignores: Option<std::collections::BTreeMap<String, Vec<RuleSelector>>>,
     function_name_case: Option<NameCase>,
 }
 
@@ -380,6 +433,9 @@ mod tests {
         assert!(config.lint.is_rule_enabled("E001"));
         assert!(!config.lint.is_rule_enabled("W201"));
         assert!(config.lint.is_rule_enabled("W301"));
+        assert!(config
+            .lint
+            .is_rule_enabled_for_path(Path::new("src/CMakeLists.txt"), "W301"));
         assert_eq!(config.lint.function_name_case, NameCase::Lower);
         assert!(!config.main.fix);
     }
@@ -389,7 +445,7 @@ mod tests {
         let directory = create_temp_dir();
         write_file(
             &directory.join(".cmake-tidy.toml"),
-            "fix = true\n[lint]\nselect = [\"W301\"]\nfunction-name-case = \"upper\"\n[format]\nmax-blank-lines = 2\n",
+            "fix = true\n[lint]\nselect = [\"W301\"]\nfunction-name-case = \"upper\"\n\n[lint.per-file-ignores]\n\"tests/**\" = [\"W301\"]\n\n[format]\nmax-blank-lines = 2\n",
         );
 
         let config = load_configuration(&directory).expect("hidden config should parse");
@@ -400,6 +456,9 @@ mod tests {
         assert!(!config.format.space_before_paren);
         assert!(config.main.fix);
         assert_eq!(config.lint.function_name_case, NameCase::Upper);
+        assert!(!config
+            .lint
+            .is_rule_enabled_for_path(Path::new("tests/example/CMakeLists.txt"), "W301"));
     }
 
     #[test]
@@ -407,7 +466,7 @@ mod tests {
         let directory = create_temp_dir();
         write_file(
             &directory.join("pyproject.toml"),
-            "[tool.cmake-tidy]\nexclude = [\"third_party\"]\nfix = true\n\n[tool.cmake-tidy.lint]\nselect = [\"W3\"]\nignore = [\"W302\"]\nfunction-name-case = \"upper\"\n\n[tool.cmake-tidy.format]\nfinal-newline = false\nspace-before-paren = true\n",
+            "[tool.cmake-tidy]\nexclude = [\"third_party\"]\nfix = true\n\n[tool.cmake-tidy.lint]\nselect = [\"W3\"]\nignore = [\"W302\"]\nfunction-name-case = \"upper\"\n\n[tool.cmake-tidy.lint.per-file-ignores]\n\"examples/**\" = [\"W301\"]\n\n[tool.cmake-tidy.format]\nfinal-newline = false\nspace-before-paren = true\n",
         );
 
         let config = load_configuration(&directory).expect("pyproject config should parse");
@@ -418,6 +477,9 @@ mod tests {
         assert!(!config.lint.is_rule_enabled("W302"));
         assert!(!config.lint.is_rule_enabled("E001"));
         assert_eq!(config.lint.function_name_case, NameCase::Upper);
+        assert!(!config
+            .lint
+            .is_rule_enabled_for_path(Path::new("examples/CMakeLists.txt"), "W301"));
         assert!(!config.format.final_newline);
         assert!(config.format.space_before_paren);
     }
@@ -473,11 +535,24 @@ mod tests {
         let lint = LintConfiguration {
             select: vec![RuleSelector::All],
             ignore: vec![RuleSelector::prefix("W2")],
+            per_file_ignores: Vec::new(),
             function_name_case: NameCase::Lower,
         };
 
         assert!(lint.is_rule_enabled("E001"));
         assert!(!lint.is_rule_enabled("W201"));
+    }
+
+    #[test]
+    fn invalid_per_file_ignore_pattern_is_rejected() {
+        let directory = create_temp_dir();
+        write_file(
+            &directory.join("cmake-tidy.toml"),
+            "[lint.per-file-ignores]\n\"[\" = [\"W301\"]\n",
+        );
+
+        let error = load_configuration(&directory).expect_err("invalid pattern should fail");
+        assert!(matches!(error, ConfigError::InvalidPerFileIgnorePattern { .. }));
     }
 
     #[test]

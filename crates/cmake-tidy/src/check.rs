@@ -30,13 +30,17 @@ pub(crate) fn run(
             project_root: target.project_root,
             function_name_case: configuration.lint.function_name_case,
         };
-        let mut diagnostics = filter_diagnostics(check_source(&source, &options).diagnostics, &lint);
+        let relative_path = relative_match_path(&target.path, &current_directory);
+        let mut diagnostics = filter_diagnostics(
+            check_source(&source, &options).diagnostics,
+            &lint,
+            &relative_path,
+        );
 
         let current_source = if fix_enabled {
             if let Some(fixed) = apply_fixes(&source, &diagnostics) {
                 fs::write(&target.path, &fixed)
                     .with_context(|| format!("failed to write fixed file: {}", target.path.display()))?;
-                filter_diagnostics(check_source(&fixed, &options).diagnostics, &lint);
                 fixed
             } else {
                 source
@@ -45,7 +49,11 @@ pub(crate) fn run(
             source
         };
 
-        diagnostics = filter_diagnostics(check_source(&current_source, &options).diagnostics, &lint);
+        diagnostics = filter_diagnostics(
+            check_source(&current_source, &options).diagnostics,
+            &lint,
+            &relative_path,
+        );
 
         if diagnostics.is_empty() {
             continue;
@@ -82,10 +90,14 @@ fn build_lint_configuration(
     lint
 }
 
-fn filter_diagnostics(diagnostics: Vec<Diagnostic>, lint: &LintConfiguration) -> Vec<Diagnostic> {
+fn filter_diagnostics(
+    diagnostics: Vec<Diagnostic>,
+    lint: &LintConfiguration,
+    path: &Path,
+) -> Vec<Diagnostic> {
     diagnostics
         .into_iter()
-        .filter(|diagnostic| lint.is_rule_enabled(&diagnostic.code.to_string()))
+        .filter(|diagnostic| lint.is_rule_enabled_for_path(path, &diagnostic.code.to_string()))
         .collect()
 }
 
@@ -173,6 +185,23 @@ fn is_excluded(path: &Path, current_directory: &Path, main: &MainConfiguration) 
     path
         .strip_prefix(current_directory)
         .map_or_else(|_| main.is_path_excluded(path), |relative| main.is_path_excluded(relative))
+}
+
+fn relative_match_path(path: &Path, current_directory: &Path) -> PathBuf {
+    if let Ok(relative) = path.strip_prefix(current_directory) {
+        return relative.to_path_buf();
+    }
+
+    if let (Ok(canonical_path), Ok(canonical_current_directory)) =
+        (fs::canonicalize(path), fs::canonicalize(current_directory))
+    {
+        if let Ok(relative) = canonical_path.strip_prefix(&canonical_current_directory) {
+            return relative.to_path_buf();
+        }
+    }
+
+    path.file_name()
+        .map_or_else(|| path.to_path_buf(), PathBuf::from)
 }
 
 fn print_diagnostic(path: &Path, source_index: &SourceIndex, diagnostic: &Diagnostic) {

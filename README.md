@@ -99,6 +99,10 @@ fix = false
 select = ["E", "W"]
 ignore = ["W203"]
 function-name-case = "lower"
+
+[lint.per-file-ignores]
+"tests/**/CMakeLists.txt" = ["W301"]
+"vendor/*.cmake" = ["ALL"]
 ```
 
 ### Format settings
@@ -129,6 +133,10 @@ fix = false
 select = ["E", "W"]
 ignore = ["W203"]
 function-name-case = "lower"
+
+[tool.cmake-tidy.lint.per-file-ignores]
+"tests/**/CMakeLists.txt" = ["W301"]
+"vendor/*.cmake" = ["ALL"]
 
 [tool.cmake-tidy.format]
 final-newline = true
@@ -165,4 +173,5 @@ You can also suppress only specific rules for the whole file:
 - Root-only project checks are applied to the discovered root `CMakeLists.txt`.
 - Bracket arguments are intentionally preserved verbatim during formatting for now.
 - The naming rule family is opt-in; it is not selected by default because default lint selection remains `["E", "W"]`.
+- `lint.per-file-ignores` uses Ruff-style pattern-to-selector mappings.
 - The architecture notes for longer-term design live in [`ARCHETECTURE.md`](ARCHETECTURE.md).
