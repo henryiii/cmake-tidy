@@ -206,10 +206,9 @@ fn relative_match_path(path: &Path, current_directory: &Path) -> PathBuf {
 
     if let (Ok(canonical_path), Ok(canonical_current_directory)) =
         (fs::canonicalize(path), fs::canonicalize(current_directory))
+        && let Ok(relative) = canonical_path.strip_prefix(&canonical_current_directory)
     {
-        if let Ok(relative) = canonical_path.strip_prefix(&canonical_current_directory) {
-            return relative.to_path_buf();
-        }
+        return relative.to_path_buf();
     }
 
     path.file_name()
