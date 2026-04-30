@@ -59,6 +59,12 @@ jobs:
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Download extra CMake test files
+        run: uvx --from https://github.com/henryiii/cmake-test-files cmake-test-files download tests/files
+
       - name: Run tests
         run: cargo test --workspace
 
