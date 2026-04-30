@@ -17,9 +17,12 @@ cmake-tidy-check = { path = "../cmake-tidy-check" }
 cmake-tidy-config = { path = "../cmake-tidy-config" }
 cmake-tidy-format = { path = "../cmake-tidy-format" }
 cmake-tidy-parser = { path = "../cmake-tidy-parser" }
+tokio = { version = "1", features = ["io-std", "macros", "rt-multi-thread", "sync"] }
+tower-lsp = "0.20"
 
 [lints]
 workspace = true
 
 [dev-dependencies]
 anyhow.workspace = true
+serde_json = "1"

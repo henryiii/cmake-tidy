@@ -1,6 +1,7 @@
 mod check;
 mod coverage_excluded;
 mod format;
+mod server;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -31,6 +32,7 @@ enum Command {
     Format {
         paths: Vec<PathBuf>,
     },
+    Server,
     Debug {
         #[command(subcommand)]
         command: DebugSubcommand,
@@ -53,6 +55,7 @@ fn main() -> ExitCode {
             paths,
         } => check::run(&paths, select, ignore, fix).map(ExitStatus::from_has_diagnostics),
         Command::Format { paths } => format::run(&paths).map(|_| ExitStatus::Success),
+        Command::Server => server::run().map(|()| ExitStatus::Success),
         Command::Debug { command } => match command {
             DebugSubcommand::Ast { filename } => debug_ast(&filename),
         },
