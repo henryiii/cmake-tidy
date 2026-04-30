@@ -63,7 +63,7 @@ jobs:
         uses: astral-sh/setup-uv@v6
 
       - name: Download extra CMake test files
-        run: uvx --from https://github.com/henryiii/cmake-test-files cmake-test-files download tests/files
+        run: uvx --from git+https://github.com/henryiii/cmake-test-files cmake-test-files download tests/files
 
       - name: Run tests
         run: cargo test --workspace
