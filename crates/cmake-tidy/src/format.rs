@@ -92,10 +92,28 @@ fn is_excluded(
     current_directory: &Path,
     main: &cmake_tidy_config::MainConfiguration,
 ) -> bool {
-    main.is_path_excluded(path)
-        || path
-            .strip_prefix(current_directory)
-            .is_ok_and(|relative| main.is_path_excluded(relative))
+    if main.is_path_excluded(path) {
+        return true;
+    }
+
+    if path
+        .strip_prefix(current_directory)
+        .is_ok_and(|relative| main.is_path_excluded(relative))
+    {
+        return true;
+    }
+
+    if let (Ok(canonical_path), Ok(canonical_current_directory)) = (
+        std::fs::canonicalize(path),
+        std::fs::canonicalize(current_directory),
+    ) && canonical_path
+        .strip_prefix(&canonical_current_directory)
+        .is_ok_and(|relative| main.is_path_excluded(relative))
+    {
+        return true;
+    }
+
+    false
 }
 
 #[cfg(test)]

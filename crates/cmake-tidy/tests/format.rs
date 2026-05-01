@@ -243,7 +243,7 @@ fn format_skips_excluded_nested_files_from_config() -> Result<()> {
         .with_context(|| format!("failed to write {}", excluded_file.display()))?;
     fs::write(
         temp_dir.join("cmake-tidy.toml"),
-        format!("exclude = [\"{}\"]\n", excluded_dir.display()),
+        "exclude = [\"generated\"]\n",
     )
     .with_context(|| format!("failed to write {}", temp_dir.display()))?;
 
