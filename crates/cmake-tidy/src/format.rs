@@ -92,10 +92,10 @@ fn is_excluded(
     current_directory: &Path,
     main: &cmake_tidy_config::MainConfiguration,
 ) -> bool {
-    path.strip_prefix(current_directory).map_or_else(
-        |_| main.is_path_excluded(path),
-        |relative| main.is_path_excluded(relative),
-    )
+    main.is_path_excluded(path)
+        || path
+            .strip_prefix(current_directory)
+            .is_ok_and(|relative| main.is_path_excluded(relative))
 }
 
 #[cfg(test)]

@@ -188,10 +188,10 @@ fn is_cmake_file(path: &Path) -> bool {
 }
 
 fn is_excluded(path: &Path, current_directory: &Path, main: &MainConfiguration) -> bool {
-    path.strip_prefix(current_directory).map_or_else(
-        |_| main.is_path_excluded(path),
-        |relative| main.is_path_excluded(relative),
-    )
+    main.is_path_excluded(path)
+        || path
+            .strip_prefix(current_directory)
+            .is_ok_and(|relative| main.is_path_excluded(relative))
 }
 
 fn relative_match_path(path: &Path, current_directory: &Path) -> PathBuf {

@@ -270,10 +270,10 @@ fn is_workspace_root_cmakelists(path: &Path, workspace_root: &Path) -> bool {
 }
 
 fn is_excluded(path: &Path, workspace_root: &Path, configuration: &Configuration) -> bool {
-    path.strip_prefix(workspace_root).map_or_else(
-        |_| configuration.main.is_path_excluded(path),
-        |relative| configuration.main.is_path_excluded(relative),
-    )
+    configuration.main.is_path_excluded(path)
+        || path
+            .strip_prefix(workspace_root)
+            .is_ok_and(|relative| configuration.main.is_path_excluded(relative))
 }
 
 fn relative_match_path(path: &Path, workspace_root: &Path) -> PathBuf {
