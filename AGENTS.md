@@ -56,7 +56,7 @@ This repository is a Rust workspace with separate crates for each stage of the p
 - `cmake-tidy-parser`: parses through `TokenSource`, which skips trivia for parsing but keeps the full token list. The parser returns `Parsed<T>` = AST + full tokens + parse errors.
 - `cmake-tidy-ast`: syntax node and range types shared across the workspace.
 - `cmake-tidy-check`: lint engine. It reparses source, produces `Diagnostic`s, applies `# noqa` suppression from tokens, and can attach autofixes as `Edit`s.
-- `cmake-tidy-format`: formatter. It is intentionally still token/line based, not a full AST/layout formatter yet.
+- `cmake-tidy-format`: formatter. Trailing-whitespace, blank-line, and space-before-paren passes are token/line based; block indentation is AST-driven (depth from block-opener/closer command names). It is not yet a full layout formatter (no argument reflow / line-width wrapping).
 - `cmake-tidy-config`: config discovery and normalization for `cmake-tidy.toml`, `.cmake-tidy.toml`, and `pyproject.toml` under `[tool.cmake-tidy]`.
 - `cmake-tidy`: CLI crate that wires config loading, path discovery, excludes, per-file ignores, fix application, and exit codes together.
 

@@ -100,11 +100,21 @@ pub enum NameCase {
     Upper,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum IndentStyle {
+    #[default]
+    Space,
+    Tab,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FormatConfiguration {
     pub final_newline: bool,
     pub max_blank_lines: usize,
     pub space_before_paren: bool,
+    pub indent_width: usize,
+    pub indent_style: IndentStyle,
 }
 
 impl Default for FormatConfiguration {
@@ -113,6 +123,19 @@ impl Default for FormatConfiguration {
             final_newline: true,
             max_blank_lines: 1,
             space_before_paren: false,
+            indent_width: 2,
+            indent_style: IndentStyle::Space,
+        }
+    }
+}
+
+impl FormatConfiguration {
+    /// The whitespace inserted for a single level of block indentation.
+    #[must_use]
+    pub fn indent_unit(&self) -> String {
+        match self.indent_style {
+            IndentStyle::Tab => "\t".to_owned(),
+            IndentStyle::Space => " ".repeat(self.indent_width),
         }
     }
 }
@@ -362,6 +385,8 @@ struct RawFormatConfiguration {
     final_newline: Option<bool>,
     max_blank_lines: Option<usize>,
     space_before_paren: Option<bool>,
+    indent_width: Option<usize>,
+    indent_style: Option<IndentStyle>,
 }
 
 impl From<RawFormatConfiguration> for FormatConfiguration {
@@ -373,6 +398,8 @@ impl From<RawFormatConfiguration> for FormatConfiguration {
             space_before_paren: value
                 .space_before_paren
                 .unwrap_or(defaults.space_before_paren),
+            indent_width: value.indent_width.unwrap_or(defaults.indent_width),
+            indent_style: value.indent_style.unwrap_or(defaults.indent_style),
         }
     }
 }

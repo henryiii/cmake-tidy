@@ -191,6 +191,7 @@ dependencies = [
  "cmake-tidy-ast",
  "cmake-tidy-config",
  "cmake-tidy-lexer",
+ "cmake-tidy-parser",
 ]
 
 [[package]]

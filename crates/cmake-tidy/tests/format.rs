@@ -56,6 +56,72 @@ fn format_preserves_multiline_string_contents() -> Result<()> {
 }
 
 #[test]
+fn format_indents_nested_blocks() -> Result<()> {
+    let temp_dir = create_file(concat!(
+        "if(A)\n",
+        "message(STATUS \"hi\")\n",
+        "foreach(x IN LISTS items)\n",
+        "add_library(${x})\n",
+        "endforeach()\n",
+        "endif()\n",
+    ))?;
+    let cmakelists = temp_dir.join("CMakeLists.txt");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cmake-tidy"))
+        .arg("format")
+        .arg(&temp_dir)
+        .output()
+        .context("failed to run cmake-tidy")?;
+
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(
+        fs::read_to_string(&cmakelists)
+            .with_context(|| format!("failed to read {}", cmakelists.display()))?,
+        concat!(
+            "if(A)\n",
+            "  message(STATUS \"hi\")\n",
+            "  foreach(x IN LISTS items)\n",
+            "    add_library(${x})\n",
+            "  endforeach()\n",
+            "endif()\n",
+        )
+    );
+
+    fs::remove_dir_all(&temp_dir)
+        .with_context(|| format!("failed to remove {}", temp_dir.display()))?;
+    Ok(())
+}
+
+#[test]
+fn format_respects_configured_indent_width() -> Result<()> {
+    let temp_dir = create_file("if(A)\nfoo()\nendif()\n")?;
+    let cmakelists = temp_dir.join("CMakeLists.txt");
+    fs::write(
+        temp_dir.join("cmake-tidy.toml"),
+        "[format]\nindent-width = 4\n",
+    )
+    .with_context(|| format!("failed to write {}", temp_dir.display()))?;
+
+    let output = Command::new(env!("CARGO_BIN_EXE_cmake-tidy"))
+        .current_dir(&temp_dir)
+        .arg("format")
+        .arg(".")
+        .output()
+        .context("failed to run cmake-tidy")?;
+
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(
+        fs::read_to_string(&cmakelists)
+            .with_context(|| format!("failed to read {}", cmakelists.display()))?,
+        "if(A)\n    foo()\nendif()\n"
+    );
+
+    fs::remove_dir_all(&temp_dir)
+        .with_context(|| format!("failed to remove {}", temp_dir.display()))?;
+    Ok(())
+}
+
+#[test]
 fn format_removes_space_before_paren_and_trims_eof_blank_lines() -> Result<()> {
     let temp_dir = create_file("message (STATUS \"hi\")\n\n\n")?;
     let cmakelists = temp_dir.join("CMakeLists.txt");
