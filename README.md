@@ -125,6 +125,8 @@ function-name-case = "lower"
 final-newline = true
 max-blank-lines = 1
 space-before-paren = false
+indent-width = 2
+indent-style = "space"
 ```
 
 Current format settings:
@@ -134,6 +136,12 @@ Current format settings:
 | `final-newline` | `bool` | `true` | Ensure files end with a newline |
 | `max-blank-lines` | integer | `1` | Maximum number of consecutive blank lines |
 | `space-before-paren` | `bool` | `false` | Use `message (...)` instead of `message(...)` |
+| `indent-width` | integer | `2` | Spaces per block-nesting level (ignored for tab style) |
+| `indent-style` | `"space"` \| `"tab"` | `"space"` | Indent block bodies with spaces or tabs |
+
+Block bodies (`if`/`foreach`/`while`/`function`/`macro`/`block`) are re-indented to match
+their nesting depth; `else`/`elseif` sit at the enclosing block's level. Bracket-argument
+contents and `# cmake-format: off` regions are left exactly as written.
 
 ## `pyproject.toml` example
 
@@ -155,6 +163,8 @@ function-name-case = "lower"
 final-newline = true
 max-blank-lines = 1
 space-before-paren = false
+indent-width = 2
+indent-style = "space"
 ```
 
 ## `noqa` support

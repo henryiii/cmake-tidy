@@ -9,6 +9,7 @@ license.workspace = true
 cmake-tidy-ast = { path = "../cmake-tidy-ast" }
 cmake-tidy-config = { path = "../cmake-tidy-config" }
 cmake-tidy-lexer = { path = "../cmake-tidy-lexer" }
+cmake-tidy-parser = { path = "../cmake-tidy-parser" }
 
 [lints]
 workspace = true
