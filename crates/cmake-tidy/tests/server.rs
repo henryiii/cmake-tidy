@@ -114,6 +114,102 @@ fn server_publishes_diagnostics_and_formats_documents() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn server_offers_quickfix_and_fix_all_code_actions() -> Result<()> {
+    let workspace_root = unique_temp_dir()?;
+    fs::create_dir_all(&workspace_root)
+        .with_context(|| format!("failed to create {}", workspace_root.display()))?;
+    fs::write(
+        workspace_root.join("cmake-tidy.toml"),
+        "[lint]\nselect = [\"N001\"]\n",
+    )
+    .context("failed to write cmake-tidy.toml")?;
+    let document_path = workspace_root.join("CMakeLists.txt");
+    fs::write(&document_path, "PROJECT(example)\n")
+        .with_context(|| format!("failed to write {}", document_path.display()))?;
+
+    let document_uri = Url::from_file_path(&document_path)
+        .map_err(|()| anyhow::anyhow!("failed to build file URL"))?;
+    let workspace_uri = Url::from_directory_path(&workspace_root)
+        .map_err(|()| anyhow::anyhow!("failed to build workspace URL"))?;
+
+    let mut session = ServerSession::spawn()?;
+
+    session.send(&json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": { "capabilities": {}, "rootUri": workspace_uri }
+    }))?;
+    session.read_until(|message| message.get("id") == Some(&json!(1)))?;
+    session.send(&json!({"jsonrpc": "2.0", "method": "initialized", "params": {}}))?;
+    session.send(&json!({
+        "jsonrpc": "2.0",
+        "method": "textDocument/didOpen",
+        "params": {
+            "textDocument": {
+                "uri": document_uri,
+                "languageId": "cmake",
+                "version": 1,
+                "text": "PROJECT(example)\n"
+            }
+        }
+    }))?;
+    session.read_until(|message| {
+        message.get("method") == Some(&json!("textDocument/publishDiagnostics"))
+    })?;
+
+    session.send(&json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "textDocument/codeAction",
+        "params": {
+            "textDocument": { "uri": document_uri },
+            "range": {
+                "start": { "line": 0, "character": 0 },
+                "end": { "line": 0, "character": 7 }
+            },
+            "context": { "diagnostics": [] }
+        }
+    }))?;
+    let response = session.read_until(|message| message.get("id") == Some(&json!(2)))?;
+    let actions = response["result"]
+        .as_array()
+        .context("code action result should be an array")?;
+
+    let quickfix = actions
+        .iter()
+        .find(|action| action["kind"] == json!("quickfix"))
+        .context("expected a quickfix action")?;
+    assert!(
+        quickfix["title"]
+            .as_str()
+            .is_some_and(|title| title.contains("N001")),
+        "{quickfix}"
+    );
+    let edits = &quickfix["edit"]["changes"][document_uri.as_str()];
+    assert_eq!(edits[0]["newText"].as_str(), Some("project"));
+
+    let fix_all = actions
+        .iter()
+        .find(|action| action["kind"] == json!("source.fixAll"))
+        .context("expected a source.fixAll action")?;
+    let fix_all_edits = &fix_all["edit"]["changes"][document_uri.as_str()];
+    assert_eq!(
+        fix_all_edits[0]["newText"].as_str(),
+        Some("project(example)\n")
+    );
+
+    session.send(&json!({"jsonrpc": "2.0", "id": 3, "method": "shutdown"}))?;
+    session.read_until(|message| message.get("id") == Some(&json!(3)))?;
+    session.send(&json!({"jsonrpc": "2.0", "method": "exit"}))?;
+    session.finish()?;
+
+    fs::remove_dir_all(&workspace_root)
+        .with_context(|| format!("failed to remove {}", workspace_root.display()))?;
+    Ok(())
+}
+
 struct ServerSession {
     child: Child,
     stdin: Option<ChildStdin>,

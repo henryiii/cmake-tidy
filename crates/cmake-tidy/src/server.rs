@@ -4,17 +4,21 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
 use cmake_tidy_ast::TextRange;
-use cmake_tidy_check::{CheckOptions, Diagnostic as CheckDiagnostic, RuleCode, check_source};
+use cmake_tidy_check::{
+    CheckOptions, Diagnostic as CheckDiagnostic, RuleCode, apply_fixes, check_source,
+};
 use cmake_tidy_config::{Configuration, load_configuration};
 use cmake_tidy_format::format_source_with_options;
 use tokio::sync::RwLock;
 use tower_lsp::jsonrpc::{Error as JsonRpcError, ErrorCode, Result as JsonResult};
 use tower_lsp::lsp_types::{
-    Diagnostic as LspDiagnostic, DiagnosticSeverity, DidChangeTextDocumentParams,
-    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentFormattingParams,
-    InitializeParams, InitializeResult, InitializedParams, MessageType, OneOf, Position, Range,
-    ServerCapabilities, ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind,
-    TextDocumentSyncOptions, TextEdit, Url, WorkspaceFolder,
+    CodeAction, CodeActionKind, CodeActionOptions, CodeActionOrCommand, CodeActionParams,
+    CodeActionProviderCapability, CodeActionResponse, Diagnostic as LspDiagnostic,
+    DiagnosticSeverity, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
+    DidOpenTextDocumentParams, DocumentFormattingParams, InitializeParams, InitializeResult,
+    InitializedParams, MessageType, OneOf, Position, Range, ServerCapabilities, ServerInfo,
+    TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions, TextEdit, Url,
+    WorkspaceEdit, WorkspaceFolder,
 };
 use tower_lsp::{Client, LanguageServer, LspService, Server, async_trait};
 
@@ -91,7 +95,13 @@ impl Backend {
         }
     }
 
-    async fn analyze_document(&self, uri: &Url, text: &str) -> Result<Vec<LspDiagnostic>> {
+    /// Run the checker and return diagnostics enabled for this document, or
+    /// `None` when the document is excluded from analysis.
+    async fn filtered_diagnostics(
+        &self,
+        uri: &Url,
+        text: &str,
+    ) -> Result<Option<Vec<CheckDiagnostic>>> {
         let workspace_root = self.workspace_root().await?;
         let file_path = file_path_from_uri(uri)?;
         let configuration = load_configuration(&workspace_root).with_context(|| {
@@ -102,7 +112,7 @@ impl Backend {
         })?;
 
         if is_excluded(&file_path, &workspace_root, &configuration) {
-            return Ok(Vec::new());
+            return Ok(None);
         }
 
         let relative_path = relative_match_path(&file_path, &workspace_root);
@@ -111,17 +121,78 @@ impl Backend {
             function_name_case: configuration.lint.function_name_case,
         };
 
+        Ok(Some(
+            check_source(text, &options)
+                .diagnostics
+                .into_iter()
+                .filter(|diagnostic| {
+                    configuration
+                        .lint
+                        .is_rule_enabled_for_path(&relative_path, &diagnostic.code.to_string())
+                })
+                .collect(),
+        ))
+    }
+
+    async fn analyze_document(&self, uri: &Url, text: &str) -> Result<Vec<LspDiagnostic>> {
+        let Some(diagnostics) = self.filtered_diagnostics(uri, text).await? else {
+            return Ok(Vec::new());
+        };
+
         let index = PositionIndex::new(text);
-        Ok(check_source(text, &options)
-            .diagnostics
+        Ok(diagnostics
             .into_iter()
-            .filter(|diagnostic| {
-                configuration
-                    .lint
-                    .is_rule_enabled_for_path(&relative_path, &diagnostic.code.to_string())
-            })
             .map(|diagnostic| to_lsp_diagnostic(&index, diagnostic))
             .collect())
+    }
+
+    async fn code_actions(&self, params: &CodeActionParams) -> Result<CodeActionResponse> {
+        let uri = &params.text_document.uri;
+        let source = self.document_text(uri).await?;
+        let Some(diagnostics) = self.filtered_diagnostics(uri, &source).await? else {
+            return Ok(Vec::new());
+        };
+
+        let only = params.context.only.as_deref();
+        let index = PositionIndex::new(&source);
+        let mut actions = Vec::new();
+
+        if kind_requested(only, &CodeActionKind::QUICKFIX) {
+            for diagnostic in &diagnostics {
+                let Some(fix) = &diagnostic.fix else {
+                    continue;
+                };
+                let fix_range = index.range(fix.range);
+                if !ranges_overlap(fix_range, params.range) {
+                    continue;
+                }
+
+                let edit = workspace_edit(uri, fix_range, fix.replacement.clone());
+                actions.push(CodeActionOrCommand::CodeAction(CodeAction {
+                    title: format!("{}: {}", diagnostic.code, diagnostic.message),
+                    kind: Some(CodeActionKind::QUICKFIX),
+                    diagnostics: Some(vec![to_lsp_diagnostic(&index, diagnostic.clone())]),
+                    edit: Some(edit),
+                    is_preferred: Some(true),
+                    ..CodeAction::default()
+                }));
+            }
+        }
+
+        if kind_requested(only, &CodeActionKind::SOURCE_FIX_ALL)
+            && let Some(fixed) = apply_fixes(&source, &diagnostics)
+        {
+            let whole = Range::new(Position::new(0, 0), index.position(source.len()));
+            let edit = workspace_edit(uri, whole, fixed);
+            actions.push(CodeActionOrCommand::CodeAction(CodeAction {
+                title: "cmake-tidy: fix all auto-fixable problems".to_owned(),
+                kind: Some(CodeActionKind::SOURCE_FIX_ALL),
+                edit: Some(edit),
+                ..CodeAction::default()
+            }));
+        }
+
+        Ok(actions)
     }
 
     async fn format_document(&self, uri: &Url) -> Result<Option<Vec<TextEdit>>> {
@@ -168,6 +239,15 @@ impl LanguageServer for Backend {
                     },
                 )),
                 document_formatting_provider: Some(OneOf::Left(true)),
+                code_action_provider: Some(CodeActionProviderCapability::Options(
+                    CodeActionOptions {
+                        code_action_kinds: Some(vec![
+                            CodeActionKind::QUICKFIX,
+                            CodeActionKind::SOURCE_FIX_ALL,
+                        ]),
+                        ..CodeActionOptions::default()
+                    },
+                )),
                 ..ServerCapabilities::default()
             },
             server_info: Some(ServerInfo {
@@ -217,6 +297,16 @@ impl LanguageServer for Backend {
     ) -> JsonResult<Option<Vec<TextEdit>>> {
         self.format_document(&params.text_document.uri)
             .await
+            .map_err(|error| jsonrpc_error(&error))
+    }
+
+    async fn code_action(
+        &self,
+        params: CodeActionParams,
+    ) -> JsonResult<Option<CodeActionResponse>> {
+        self.code_actions(&params)
+            .await
+            .map(Some)
             .map_err(|error| jsonrpc_error(&error))
     }
 }
@@ -284,6 +374,34 @@ fn relative_match_path(path: &Path, workspace_root: &Path) -> PathBuf {
         },
         PathBuf::from,
     )
+}
+
+/// A code action kind is requested when the client sends no `only` filter, or
+/// when one of the requested kinds is a prefix of ours (e.g. `source` matches
+/// `source.fixAll`).
+fn kind_requested(only: Option<&[CodeActionKind]>, kind: &CodeActionKind) -> bool {
+    only.is_none_or(|kinds| {
+        kinds
+            .iter()
+            .any(|requested| kind.as_str().starts_with(requested.as_str()))
+    })
+}
+
+fn ranges_overlap(a: Range, b: Range) -> bool {
+    !(position_before(b.end, a.start) || position_before(a.end, b.start))
+}
+
+fn position_before(a: Position, b: Position) -> bool {
+    (a.line, a.character) < (b.line, b.character)
+}
+
+fn workspace_edit(uri: &Url, range: Range, new_text: String) -> WorkspaceEdit {
+    let mut changes = HashMap::new();
+    changes.insert(uri.clone(), vec![TextEdit { range, new_text }]);
+    WorkspaceEdit {
+        changes: Some(changes),
+        ..WorkspaceEdit::default()
+    }
 }
 
 fn to_lsp_diagnostic(index: &PositionIndex, diagnostic: CheckDiagnostic) -> LspDiagnostic {
