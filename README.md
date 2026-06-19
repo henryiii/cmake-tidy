@@ -67,6 +67,18 @@ Current formatting behavior:
 - preserves bracket-argument contents verbatim
 - honors `# cmake-format: off` / `# cmake-format: on` regions verbatim
 
+### `cmake-tidy server`
+
+Runs a [Language Server Protocol](https://microsoft.github.io/language-server-protocol/)
+server over stdio for editor integration.
+
+Current capabilities:
+
+- publishes diagnostics on open and change, respecting config and per-file ignores
+- whole-document formatting (`textDocument/formatting`)
+- quick-fix code actions for individual diagnostics that carry an autofix
+- a `source.fixAll` action that applies every available autofix at once
+
 ## Configuration
 
 Configuration is discovered in this order:
@@ -190,4 +202,3 @@ Code inside a disabled region is preserved verbatim. Formatting resumes after th
 - `lint.per-file-ignores` uses Ruff-style pattern-to-selector mappings.
 - Use `cargo coverage` for the canonical workspace coverage summary and `cargo coverage-html` for an HTML report.
 - The coverage aliases intentionally exclude `coverage_excluded.rs` helper files that only wrap low-value filesystem/error handling paths.
-- The architecture notes for longer-term design live in [`ARCHETECTURE.md`](ARCHETECTURE.md).
